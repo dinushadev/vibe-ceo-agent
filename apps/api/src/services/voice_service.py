@@ -115,10 +115,10 @@ class VoiceService:
             logger.info(f"Synthesizing speech for: {text[:50]}...")
             synthesis_input = texttospeech.SynthesisInput(text=text)
             
-            # Use a more human-like 'Journey' voice
+            # Use a more human-like 'Neural2' voice
             voice = texttospeech.VoiceSelectionParams(
                 language_code="en-US",
-                name="en-US-Journey-D"  # Warm, expressive male voice
+                name="en-US-Neural2-D"  # Warm, expressive male voice
             )
             
             audio_config = texttospeech.AudioConfig(
@@ -143,5 +143,5 @@ class VoiceService:
             return response.audio_content
             
         except Exception as e:
-            logger.error(f"Error synthesizing speech: {e}")
+            logger.error(f"Error synthesizing speech: {e}", exc_info=True)
             return None

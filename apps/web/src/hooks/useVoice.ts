@@ -50,6 +50,7 @@ export function useVoice(): UseVoiceReturn {
                     setIsProcessing(false);
                     // Optional: Display agent text response
                 } else if (data.type === 'audio_response') {
+                    console.log('Received audio response, adding to queue');
                     // Add to queue instead of playing immediately
                     audioQueueRef.current.push(data.payload);
                     processAudioQueue();
@@ -90,6 +91,7 @@ export function useVoice(): UseVoiceReturn {
     const playAudio = async (base64Audio: string): Promise<void> => {
         return new Promise(async (resolve) => {
             try {
+                console.log('Starting audio playback...');
                 const audioData = atob(base64Audio);
                 const arrayBuffer = new ArrayBuffer(audioData.length);
                 const view = new Uint8Array(arrayBuffer);
@@ -101,12 +103,18 @@ export function useVoice(): UseVoiceReturn {
                     audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
                 }
 
+                // Ensure context is running (browsers may suspend it)
+                if (audioContextRef.current.state === 'suspended') {
+                    await audioContextRef.current.resume();
+                }
+
                 const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
                 const source = audioContextRef.current.createBufferSource();
                 source.buffer = audioBuffer;
                 source.connect(audioContextRef.current.destination);
 
                 source.onended = () => {
+                    console.log('Audio playback finished');
                     isPlayingRef.current = false;
                     resolve();
                 };
