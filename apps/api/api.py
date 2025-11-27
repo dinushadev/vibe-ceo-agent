@@ -13,6 +13,9 @@ from dotenv import load_dotenv
 # Import database and orchestrator
 from src.db.database import get_database
 from src.orchestrator import Orchestrator
+from src.services.voice_service import VoiceService
+import asyncio
+import base64
 
 # Load environment variables
 load_dotenv()
@@ -27,12 +30,13 @@ logger = logging.getLogger(__name__)
 # Global instances
 db = None
 orchestrator = None
+voice_service = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle management for the FastAPI application"""
-    global db, orchestrator
+    global db, orchestrator, voice_service
     
     logger.info("Starting Personal Vibe CEO System API...")
     
@@ -43,6 +47,10 @@ async def lifespan(app: FastAPI):
     # Initialize orchestrator with all agents
     orchestrator = Orchestrator(db)
     logger.info("Orchestrator and agents initialized")
+
+    # Initialize Voice Service
+    voice_service = VoiceService()
+    logger.info("Voice Service initialized")
     
     yield
     
@@ -265,45 +273,114 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     logger.info("WebSocket connection established")
     
+    # Queue for audio chunks
+    audio_queue = asyncio.Queue()
+    
+    async def audio_generator():
+        """Yields audio chunks from the queue"""
+        while True:
+            chunk = await audio_queue.get()
+            if chunk is None: # Sentinel
+                break
+            yield chunk
+
+    async def receive_audio():
+        """Receive audio from WebSocket and put in queue"""
+        try:
+            while True:
+                data = await websocket.receive_json()
+                message_type = data.get("type")
+                
+                if message_type == "audio_chunk":
+                    # Expecting base64 encoded audio
+                    payload = data.get("payload")
+                    if payload:
+                        try:
+                            chunk = base64.b64decode(payload)
+                            await audio_queue.put(chunk)
+                        except Exception as e:
+                            logger.error(f"Error decoding audio chunk: {e}")
+                
+                elif message_type == "ping":
+                    await websocket.send_json({
+                        "type": "pong",
+                        "payload": {},
+                        "timestamp": "2025-11-24T13:51:00Z"
+                    })
+                    
+        except WebSocketDisconnect:
+            logger.info("WebSocket connection closed")
+            await audio_queue.put(None) # Signal end of stream
+        except Exception as e:
+            logger.error(f"WebSocket receive error: {e}")
+            await audio_queue.put(None)
+
+    async def process_audio():
+        """Process audio stream and send responses"""
+        try:
+            if not voice_service.speech_client:
+                logger.warning("Voice service not available, skipping transcription")
+                return
+
+            # Process the stream
+            async for result in voice_service.transcribe_stream(audio_generator()):
+                transcript = result["text"]
+                is_final = result["is_final"]
+                
+                # Send transcript to client (interim or final)
+                await websocket.send_json({
+                    "type": "transcript",
+                    "payload": {
+                        "text": transcript,
+                        "is_final": is_final
+                    }
+                })
+                
+                # Only process with agent if final
+                if is_final:
+                    logger.info(f"User said (final): {transcript}")
+                    
+                    # Get agent response
+                    # TODO: Add user_id to context if available
+                    response = await orchestrator.process_message("user_voice", transcript)
+                    agent_text = response.get("response", "")
+                    
+                    # Send text response
+                    await websocket.send_json({
+                        "type": "agent_response",
+                        "payload": response
+                    })
+                    
+                    # Synthesize and send audio
+                    if agent_text:
+                        audio_bytes = await voice_service.synthesize_speech(agent_text)
+                        if audio_bytes:
+                            # Send audio as base64
+                            audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                            await websocket.send_json({
+                                "type": "audio_response",
+                                "payload": audio_b64
+                            })
+                        
+        except Exception as e:
+            logger.error(f"Error processing audio: {e}")
+
+    # Run receive and process loops concurrently
     try:
-        # Send connection acknowledgment
         await websocket.send_json({
             "type": "connection_ack",
             "payload": {"status": "connected"},
             "timestamp": "2025-11-24T13:51:00Z"
         })
         
-        while True:
-            # Receive messages from client
-            data = await websocket.receive_json()
-            message_type = data.get("type")
-            
-            if message_type == "audio_chunk":
-                # TODO: Process audio with Google ADK
-                # transcription = await process_audio(data["payload"])
-                
-                # Echo back for now
-                await websocket.send_json({
-                    "type": "transcript",
-                    "payload": {
-                        "text": "Audio received",
-                        "is_final": False
-                    },
-                    "timestamp": "2025-11-24T13:51:00Z"
-                })
-            
-            elif message_type == "ping":
-                await websocket.send_json({
-                    "type": "pong",
-                    "payload": {},
-                    "timestamp": "2025-11-24T13:51:00Z"
-                })
-    
-    except WebSocketDisconnect:
-        logger.info("WebSocket connection closed")
+        await asyncio.gather(receive_audio(), process_audio())
+        
     except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        await websocket.close(code=1011, reason=str(e))
+        logger.error(f"WebSocket handler error: {e}")
+        try:
+            await websocket.close(code=1011)
+        except:
+            pass
 
 
 # ============================================================================

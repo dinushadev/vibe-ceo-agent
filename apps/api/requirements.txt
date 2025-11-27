@@ -13,6 +13,8 @@ pydantic-settings>=2.0
 # Google Cloud & Vertex AI
 google-cloud-aiplatform>=1.73.0
 google-generativeai>=0.8.3
+google-cloud-speech>=2.21.0
+google-cloud-texttospeech>=2.14.0
 
 # Database (updated for ADK compatibility)
 aiosqlite>=0.21.0
