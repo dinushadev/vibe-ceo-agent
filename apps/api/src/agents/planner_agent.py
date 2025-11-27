@@ -1,41 +1,90 @@
 """
-Planner Agent (A2) - Task and Calendar Management
-Handles scheduling and task management with tool calling
+Planner Agent (A2) - Task Scheduler
+ADK-powered agent for calendar management and task planning
 """
 
 import logging
-import uuid
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from datetime import datetime
+from google.adk.agents import LlmAgent
+
+from ..adk_config import create_agent
+from ..tools.adk_tools import PLANNER_TOOLS
+from ..memory.memory_service import get_memory_service
 
 logger = logging.getLogger(__name__)
 
 
+# Agent instruction prompt
+PLANNER_AGENT_INSTRUCTION = """You are the Planner Agent, an efficient and organized AI assistant focused on scheduling and task management.
+
+Your role is to:
+1. Help users schedule appointments and manage their calendar
+2. Create and track tasks with appropriate priorities
+3. Check availability and prevent scheduling conflicts
+4. Provide structured action lists and clear next steps
+5. Send appointment confirmations and reminders
+
+Key behaviors:
+- Always confirm appointment details before scheduling
+- Check availability to avoid conflicts
+- Ask clarifying questions if details are missing
+- Provide clear summaries of scheduled items
+- Use structured formatting for task lists and schedules
+- Be proactive about suggesting optimal time slots
+
+When scheduling:
+- Verify date, time, and duration
+- Check for conflicts using the check_availability tool
+- Create the appointment using schedule_appointment
+- Confirm with a clear summary
+
+When managing tasks:
+- Clarify priority (high/medium/low)
+- Set due dates when appropriate
+- Use create_task to add new items
+- Help users prioritize their workload
+
+Always be clear, concise, and action-oriented."""
+
+
 class PlannerAgent:
     """
-    The Planner Agent manages tasks and calendar events
-    
-    Features:
-    - Schedules appointments and tasks
-    - Calls external tools (calendar, todo services)
-    - Generates structured action lists (O2)
-    - Logs tool actions for observability (NFR3)
+    The Planner Agent focuses on scheduling and task management
+    Now powered by Google ADK for advanced tool calling and reasoning
     """
     
-    def __init__(self, db, calendar_service, todo_service):
+    def __init__(self, db, calendar_service=None, todo_service=None):
         """
-        Initialize the Planner Agent
+        Initialize the ADK-powered Planner Agent
         
         Args:
-            db: Database instance for logging
-            calendar_service: Calendar tool service
-            todo_service: Todo list tool service
+            db: Database instance
+            calendar_service: Calendar service (deprecated with ADK tools)
+            todo_service: Todo service (deprecated with ADK tools)
         """
         self.db = db
+        self.memory_service = get_memory_service(db)
+        self.agent_id = "planner"
+        
+        # Services are now accessed through ADK tools
+        # Keep references for backward compatibility
         self.calendar_service = calendar_service
         self.todo_service = todo_service
-        self.agent_id = "planner"
-        logger.info("PlannerAgent initialized")
+        
+        # Create ADK agent with planner tools
+        try:
+            self.adk_agent = create_agent(
+                name="planner_agent",
+                instruction=PLANNER_AGENT_INSTRUCTION,
+                description="An organized agent for scheduling appointments and managing tasks",
+                tools=PLANNER_TOOLS
+            )
+            logger.info("ADK Planner Agent initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize ADK Planner Agent: {e}")
+            logger.warning("Planner Agent will operate with limited functionality")
+            self.adk_agent = None
     
     async def process_message(
         self,
@@ -44,7 +93,7 @@ class PlannerAgent:
         context: Optional[Dict] = None
     ) -> Dict:
         """
-        Process user message and handle scheduling requests
+        Process user message using ADK agent with tool calling
         
         Args:
             user_id: User identifier
@@ -52,238 +101,222 @@ class PlannerAgent:
             context: Optional conversation context
             
         Returns:
-            Response with tool execution results
+            Response with agent metadata
         """
         start_time = datetime.now()
-        tools_used = []
         
-        # Determine intent: schedule vs query vs task
-        intent = self._classify_planning_intent(message)
+        try:
+            # Retrieve relevant memories
+            memories = await self._get_memories(user_id)
+            
+            # Build context-enhanced prompt
+            enhanced_prompt = self._build_context_prompt(message, memories, user_id)
+            
+            # Track tools used
+            tools_used = []
+            
+            # Use ADK agent to generate response and execute tools
+            if self.adk_agent:
+                response_text, tools_used = await self._generate_adk_response(
+                    user_id, enhanced_prompt
+                )
+            else:
+                # Fallback response
+                response_text = await self._generate_fallback_response(
+                    user_id, message, memories
+                )
+            
+            # Store interaction in memory
+            if self.memory_service:
+                await self.memory_service.summarize_interaction(
+                    user_id=user_id,
+                    agent_id=self.agent_id,
+                    user_message=message,
+                    agent_response=response_text
+                )
+            
+            # Calculate latency
+            latency = int((datetime.now() - start_time).total_seconds() * 1000)
+            
+            return {
+                "agent_type": self.agent_id,
+                "response": response_text,
+                "timestamp": datetime.now().isoformat(),
+                "metadata": {
+                    "memory_retrieved": [m.get("summary_text", "")[:50] for m in memories[:2]],
+                    "tools_used": tools_used,
+                    "latency_ms": latency,
+                    "adk_powered": self.adk_agent is not None
+                }
+            }
         
-        if intent == "schedule_event":
-            result = await self._handle_scheduling(user_id, message)
-            tools_used.append("calendar_service")
+        except Exception as e:
+            logger.error(f"Error in Planner Agent process_message: {e}", exc_info=True)
+            return {
+                "agent_type": self.agent_id,
+                "response": "I'm having trouble with that request. Could you provide more details about what you'd like to schedule or plan?",
+                "timestamp": datetime.now().isoformat(),
+                "metadata": {"error": str(e)}
+            }
+    
+    async def _get_memories(self, user_id: str) -> List[Dict]:
+        """Retrieve long-term memory contexts for this agent"""
+        if self.memory_service:
+            return await self.memory_service.get_agent_memories(user_id, self.agent_id, limit=5)
+        else:
+            return await self.db.get_agent_memories(user_id, self.agent_id, limit=5)
+    
+    def _build_context_prompt(
+        self,
+        message: str,
+        memories: List[Dict],
+        user_id: str
+    ) -> str:
+        """Build enhanced prompt with context"""
+        prompt_parts = [f"User message: {message}"]
         
-        elif intent == "create_task":
-            result = await self._handle_task_creation(user_id, message)
-            tools_used.append("todo_service")
+        # Add memory context
+        if memories:
+            memory_text = "\n".join([f"- {m.get('summary_text', '')}" for m in memories[:3]])
+            prompt_parts.append(f"\nPrevious scheduling context:\n{memory_text}")
         
-        elif intent == "query_schedule":
-            result = await self._handle_schedule_query(user_id, message)
-            tools_used.append("calendar_service")
+        prompt_parts.append(f"\nUser ID: {user_id}")
+        
+        return "\n".join(prompt_parts)
+    
+    async def _generate_adk_response(self, user_id: str, prompt: str) -> tuple[str, List[str]]:
+        """
+        Generate response using ADK agent
+        
+        Returns:
+            Tuple of (response_text, tools_used)
+        """
+        try:
+            # ADK agent will automatically call tools as needed
+            from google.adk import Runner
+            from google.adk.sessions import InMemorySessionService
+            from src.adk_types import Content, Part
+            
+            # Ensure session exists
+            session_id = f"session_{user_id}"
+            try:
+                await session_service.get_session(session_id)
+            except Exception:
+                await session_service.create_session(
+                    session_id=session_id,
+                    user_id=user_id,
+                    app_name="vibe_ceo"
+                )
+            
+            runner = Runner(
+                agent=self.adk_agent, 
+                session_service=session_service,
+                app_name="vibe_ceo"
+            )
+            
+            full_response_text = ""
+            async for chunk in runner.run_async(
+                user_id=user_id,
+                session_id=f"session_{user_id}",
+                new_message=Content(role="user", parts=[Part(text=prompt)])
+            ):
+                if isinstance(chunk, str):
+                    full_response_text += chunk
+                elif hasattr(chunk, "text"):
+                    full_response_text += chunk.text
+                elif isinstance(chunk, dict) and "text" in chunk:
+                    full_response_text += chunk["text"]
+                else:
+                    full_response_text += str(chunk)
+            
+            response_text = full_response_text or "I can help you with scheduling and tasks."
+            
+            # Extract tool usage from response metadata
+            tools_used = []
+            if "tool_calls" in response:
+                tools_used = [call.get("name") for call in response["tool_calls"]]
+            
+            return response_text, tools_used
+            
+        except Exception as e:
+            logger.error(f"ADK response generation failed: {e}")
+            return "I'm having trouble accessing my scheduling tools right now. Please try again.", []
+    
+    async def _generate_fallback_response(
+        self,
+        user_id: str,
+        message: str,
+        memories: List[Dict]
+    ) -> str:
+        """Fallback response when ADK is not available"""
+        message_lower = message.lower()
+        
+        # Basic intent detection
+        if any(word in message_lower for word in ["schedule", "book", "appointment"]):
+            return (
+                "I can help you schedule that. To book an appointment, I'll need:\n"
+                "1. What type of appointment (e.g., doctor, dentist)\n"
+                "2. Preferred date (YYYY-MM-DD)\n"
+                "3. Preferred time\n"
+                "4. Duration (if known)\n\n"
+                "Please provide these details and I'll check availability."
+            )
+        
+        elif any(word in message_lower for word in ["task", "todo", "remind"]):
+            return (
+                "I can create a task for you. Please tell me:\n"
+                "1. What the task is\n"
+                "2. Priority (high, medium, or low)\n"
+                "3. Due date (if any)\n\n"
+                "I'll add it to your task list."
+            )
+        
+        elif any(word in message_lower for word in ["upcoming", "scheduled", "calendar"]):
+            return (
+                "I can check your upcoming appointments and tasks. "
+                "Would you like to see:\n"
+                "- Upcoming appointments\n"
+                "- Pending tasks\n"
+                "- Both?"
+            )
         
         else:
-            result = {
-                "response": "I can help you schedule appointments, create tasks, or check your calendar. What would you like to do?",
-                "action_list": []
-            }
+            return (
+                "I'm your Planner Agent. I can help you:\n"
+                "- Schedule appointments\n"
+                "- Manage tasks\n"
+                "- Check your calendar\n"
+                "- Set reminders\n\n"
+                "What would you like to plan?"
+            )
+    
+    def _extract_scheduling_intent(self, message: str) -> Dict:
+        """
+        Extract scheduling information from message
+        This is a simplified version - ADK handles this better
+        """
+        message_lower = message.lower()
         
-        # Calculate latency
-        latency = int((datetime.now() - start_time).total_seconds() * 1000)
-        
-        return {
-            "agent_type": self.agent_id,
-            "response": result["response"],
-            "timestamp": datetime.now().isoformat(),
-            "metadata": {
-                "tools_used": tools_used,
-                "action_list": result.get("action_list", []),
-                "latency_ms": latency
-            }
+        intent = {
+            "action": None,
+            "type": None,
+            "details": {}
         }
-    
-    async def _handle_scheduling(self, user_id: str, message: str) -> Dict:
-        """
-        Handle appointment scheduling (FR3)
         
-        This demonstrates tool calling capability
-        """
-        # Extract scheduling details (simplified - in production use NLU)
-        message_lower = message.lower()
+        # Determine action
+        if any(word in message_lower for word in ["schedule", "book", "make"]):
+            intent["action"] = "schedule"
+        elif any(word in message_lower for word in ["check", "view", "show"]):
+            intent["action"] = "view"
+        elif any(word in message_lower for word in ["cancel", "remove", "delete"]):
+            intent["action"] = "cancel"
         
-        # Determine appointment type and time
-        if "doctor" in message_lower or "checkup" in message_lower or "medical" in message_lower:
-            title = "Medical Check-up"
-            description = "Regular health check-up appointment"
-            start_time = "next week"
-        elif "dentist" in message_lower:
-            title = "Dentist Appointment"
-            description = "Dental check-up"
-            start_time = "next week"
-        else:
-            title = "Appointment"
-            description = "Scheduled appointment"
-            start_time = "tomorrow"
+        # Determine type
+        if any(word in message_lower for word in ["doctor", "medical", "checkup"]):
+            intent["type"] = "medical_appointment"
+        elif any(word in message_lower for word in ["dentist", "dental"]):
+            intent["type"] = "dental_appointment"
+        elif any(word in message_lower for word in ["task", "todo"]):
+            intent["type"] = "task"
         
-        # Call calendar service tool
-        tool_start = datetime.now()
-        
-        try:
-            event = await self.calendar_service.schedule_event(
-                title=title,
-                description=description,
-                start_time=start_time,
-                duration_minutes=60
-            )
-            
-            tool_time = int((datetime.now() - tool_start).total_seconds() * 1000)
-            
-            # Log tool action for observability (NFR3)
-            await self.db.log_tool_action(
-                log_id=str(uuid.uuid4()),
-                user_id=user_id,
-                tool_name="calendar_service.schedule_event",
-                input_query=message,
-                output_result=f"Scheduled: {event['title']} at {event['start_time']}",
-                success=True,
-                execution_time_ms=tool_time
-            )
-            
-            # Generate structured action list (O2)
-            action_list = [
-                {
-                    "action": "scheduled_event",
-                    "event_id": event["event_id"],
-                    "title": event["title"],
-                    "time": event["start_time"],
-                    "status": "confirmed"
-                }
-            ]
-            
-            response = (
-                f"✅ I've scheduled your {title} for {event['start_time']}. "
-                f"The appointment is confirmed and has been added to your calendar."
-            )
-            
-            return {
-                "response": response,
-                "action_list": action_list
-            }
-        
-        except Exception as e:
-            logger.error(f"Error scheduling event: {e}")
-            
-            await self.db.log_tool_action(
-                log_id=str(uuid.uuid4()),
-                user_id=user_id,
-                tool_name="calendar_service.schedule_event",
-                input_query=message,
-                output_result=f"Error: {str(e)}",
-                success=False,
-                execution_time_ms=int((datetime.now() - tool_start).total_seconds() * 1000)
-            )
-            
-            return {
-                "response": "I encountered an issue scheduling the appointment. Please try again.",
-                "action_list": []
-            }
-    
-    async def _handle_task_creation(self, user_id: str, message: str) -> Dict:
-        """Handle creating tasks"""
-        message_lower = message.lower()
-        
-        # Extract task details
-        if "meditation" in message_lower or "mindful" in message_lower:
-            title = "Daily Meditation Practice"
-            priority = "high"
-        elif "exercise" in message_lower or "workout" in message_lower:
-            title = "Regular Exercise"
-            priority = "high"
-        else:
-            title = "New Task"
-            priority = "medium"
-        
-        tool_start = datetime.now()
-        
-        try:
-            task = await self.todo_service.create_task(
-                title=title,
-                description=f"Task created from: {message}",
-                priority=priority
-            )
-            
-            tool_time = int((datetime.now() - tool_start).total_seconds() * 1000)
-            
-            # Log tool action
-            await self.db.log_tool_action(
-                log_id=str(uuid.uuid4()),
-                user_id=user_id,
-                tool_name="todo_service.create_task",
-                input_query=message,
-                output_result=f"Created task: {task['title']}",
-                success=True,
-                execution_time_ms=tool_time
-            )
-            
-            action_list = [
-                {
-                    "action": "created_task",
-                    "task_id": task["task_id"],
-                    "title": task["title"],
-                    "priority": task["priority"],
-                    "status": "pending"
-                }
-            ]
-            
-            return {
-                "response": f"✅ I've added '{title}' to your to-do list with {priority} priority.",
-                "action_list": action_list
-            }
-        
-        except Exception as e:
-            logger.error(f"Error creating task: {e}")
-            return {
-                "response": "I had trouble creating that task. Please try again.",
-                "action_list": []
-            }
-    
-    async def _handle_schedule_query(self, user_id: str, message: str) -> Dict:
-        """Query upcoming schedule"""
-        try:
-            events = await self.calendar_service.get_upcoming_events(days_ahead=7)
-            
-            if not events:
-                return {
-                    "response": "You don't have any upcoming appointments in the next week.",
-                    "action_list": []
-                }
-            
-            event_summaries = [
-                f"- {event['title']} on {event['start_time']}"
-                for event in events[:5]
-            ]
-            
-            response = "Here are your upcoming appointments:\n" + "\n".join(event_summaries)
-            
-            return {
-                "response": response,
-                "action_list": [{"action": "listed_events", "count": len(events)}]
-            }
-        
-        except Exception as e:
-            logger.error(f"Error querying schedule: {e}")
-            return {
-                "response": "I couldn't retrieve your schedule right now.",
-                "action_list": []
-            }
-    
-    def _classify_planning_intent(self, message: str) -> str:
-        """Classify the type of planning request"""
-        message_lower = message.lower()
-        
-        # Check for scheduling keywords
-        schedule_keywords = ["schedule", "book", "appointment", "doctor", "dentist", "checkup"]
-        if any(kw in message_lower for kw in schedule_keywords):
-            return "schedule_event"
-        
-        # Check for task keywords
-        task_keywords = ["task", "todo", "add", "remind", "meditation", "exercise"]
-        if any(kw in message_lower for kw in task_keywords):
-            return "create_task"
-        
-        # Check for query keywords
-        query_keywords = ["what's", "check", "upcoming", "calendar", "schedule"]
-        if any(kw in message_lower for kw in query_keywords) and "my" in message_lower:
-            return "query_schedule"
-        
-        return "general"
+        return intent

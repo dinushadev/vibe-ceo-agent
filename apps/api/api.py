@@ -81,8 +81,30 @@ async def root():
         "status": "healthy",
         "service": "Personal Vibe CEO System",
         "version": "1.0.0",
-        "agents": ["vibe", "planner", "knowledge"]
+        "agents": ["vibe", "planner", "knowledge"],
+        "adk_enabled": True
     }
+
+
+@app.get("/api/status")
+async def get_status():
+    """Get system status including ADK agent information"""
+    try:
+        agent_status = orchestrator.get_agent_status()
+        
+        return {
+            "status": "operational",
+            "service": "Personal Vibe CEO System (ADK-Powered)",
+            "version": "1.0.0",
+            "timestamp": "2025-11-24T17:53:00Z",
+            "adk_integration": agent_status
+        }
+    except Exception as e:
+        logger.error(f"Error getting status: {e}")
+        return {
+            "status": "degraded",
+            "error": str(e)
+        }
 
 
 @app.post("/api/chat")

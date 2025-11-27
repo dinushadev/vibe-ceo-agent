@@ -1,38 +1,80 @@
 """
 Vibe Agent (A1) - Proactive Balance Check
-Monitors emotional and health well-being, uses long-term memory
+ADK-powered agent for emotional and health well-being monitoring
 """
 
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime
+from google.adk.agents import LlmAgent
+
+from ..adk_config import create_agent
+from ..tools.adk_tools import VIBE_TOOLS, get_health_data
+from ..memory.memory_service import get_memory_service
 
 logger = logging.getLogger(__name__)
+
+
+# Agent instruction prompt
+VIBE_AGENT_INSTRUCTION = """You are the Vibe Agent, a compassionate and empathetic AI companion focused on emotional well-being and work-life balance.
+
+Your role is to:
+1. Monitor the user's health data (sleep patterns, screen time) and identify imbalances
+2. Provide empathetic support and guidance for stress management
+3. Recall previous conversations and context to provide personalized support
+4. Proactively check in when you detect concerning patterns
+5. Use warm, supportive language that makes the user feel heard and understood
+
+Key behaviors:
+- Always acknowledge the user's feelings first
+- Reference past conversations when relevant to show continuity
+- Suggest concrete, actionable steps for improvement
+- Be encouraging but realistic
+- Focus on balance and sustainable habits
+
+When analyzing health data:
+- Sleep < 7 hours is concerning
+- Screen time > 8 hours may indicate imbalance
+- High imbalance scores (>10) require gentle proactive outreach
+
+Always respond with empathy and encouragement."""
 
 
 class VibeAgent:
     """
     The Vibe Agent focuses on emotional well-being and proactive check-ins
-    
-    Features:
-    - Monitors health data (sleep, screen time)
-    - Uses long-term memory to recall context
-    - Initiates proactive conversations when imbalance detected
-    - Employs empathetic language (FR6)
+    Now powered by Google ADK for advanced reasoning and memory
     """
     
     def __init__(self, db, memory_service=None):
         """
-        Initialize the Vibe Agent
+        Initialize the ADK-powered Vibe Agent
         
         Args:
             db: Database instance for health logs
             memory_service: Optional memory service for long-term context
         """
         self.db = db
-        self.memory_service = memory_service
+        self.memory_service = memory_service or get_memory_service(db)
         self.agent_id = "vibe"
-        logger.info("VibeAgent initialized")
+        
+        # Initialize ADK Session Service
+        from google.adk.sessions import InMemorySessionService
+        self.session_service = InMemorySessionService()
+        
+        # Create ADK agent
+        try:
+            self.adk_agent = create_agent(
+                name="vibe_agent",
+                instruction=VIBE_AGENT_INSTRUCTION,
+                description="An empathetic agent focused on emotional well-being and work-life balance",
+                tools=VIBE_TOOLS
+            )
+            logger.info("ADK Vibe Agent initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize ADK Vibe Agent: {e}")
+            logger.warning("Vibe Agent will operate with limited functionality")
+            self.adk_agent = None
     
     async def process_message(
         self,
@@ -41,7 +83,7 @@ class VibeAgent:
         context: Optional[Dict] = None
     ) -> Dict:
         """
-        Process user message and generate empathetic response
+        Process user message using ADK agent
         
         Args:
             user_id: User identifier
@@ -53,38 +95,63 @@ class VibeAgent:
         """
         start_time = datetime.now()
         
-        # Retrieve user's memory context
-        memories = await self._get_memories(user_id)
-        
-        # Get recent health data
-        health_logs = await self.db.get_user_health_logs(user_id, limit=3)
-        
-        # Generate empathetic response
-        response_text = await self._generate_response(
-            user_id,
-            message,
-            memories,
-            health_logs
-        )
-        
-        # Calculate latency
-        latency = int((datetime.now() - start_time).total_seconds() * 1000)
-        
-        return {
-            "agent_type": self.agent_id,
-            "response": response_text,
-            "timestamp": datetime.now().isoformat(),
-            "metadata": {
-                "memory_retrieved": [m.get("summary_text") for m in memories[:2]],
-                "tools_used": [],
-                "latency_ms": latency,
-                "health_assessment": self._assess_health(health_logs) if health_logs else None
+        try:
+            # Retrieve user's memory context
+            memories = await self._get_memories(user_id)
+            
+            # Get recent health data
+            health_logs = await self.db.get_user_health_logs(user_id, limit=3)
+            
+            # Build context-enhanced prompt
+            enhanced_prompt = self._build_context_prompt(message, memories, health_logs)
+            
+            # Use ADK agent to generate response
+            if self.adk_agent:
+                response_text = await self._generate_adk_response(user_id, enhanced_prompt)
+            else:
+                # Fallback to basic response
+                response_text = await self._generate_fallback_response(
+                    user_id, message, memories, health_logs
+                )
+            
+            # Store interaction in memory
+            if self.memory_service:
+                await self.memory_service.summarize_interaction(
+                    user_id=user_id,
+                    agent_id=self.agent_id,
+                    user_message=message,
+                    agent_response=response_text
+                )
+            
+            # Calculate latency
+            latency = int((datetime.now() - start_time).total_seconds() * 1000)
+            
+            return {
+                "agent_type": self.agent_id,
+                "response": response_text,
+                "timestamp": datetime.now().isoformat(),
+                "metadata": {
+                    "memory_retrieved": [m.get("summary_text", "")[:50] for m in memories[:2]],
+                    "tools_used": ["get_health_data"] if health_logs else [],
+                    "latency_ms": latency,
+                    "health_assessment": self._assess_health(health_logs) if health_logs else None,
+                    "adk_powered": self.adk_agent is not None
+                }
             }
-        }
+        
+        except Exception as e:
+            logger.error(f"Error in Vibe Agent process_message: {e}", exc_info=True)
+            return {
+                "agent_type": self.agent_id,
+                "response": "I'm having trouble processing your message right now, but I'm here for you. Could you try rephrasing that?",
+                "timestamp": datetime.now().isoformat(),
+                "metadata": {"error": str(e)}
+            }
     
     async def check_for_proactive_outreach(self, user_id: str) -> Optional[Dict]:
         """
         Check if proactive check-in is needed (FR1)
+        Uses ADK reasoning to determine if outreach is appropriate
         
         Args:
             user_id: User identifier
@@ -92,67 +159,138 @@ class VibeAgent:
         Returns:
             Proactive message if needed, None otherwise
         """
-        # Get recent health data
-        health_logs = await self.db.get_user_health_logs(user_id, limit=7)
-        
-        if not health_logs:
-            return None
-        
-        # Calculate average imbalance score
-        avg_imbalance = sum(log["imbalance_score"] for log in health_logs) / len(health_logs)
-        
-        # Trigger proactive check-in if imbalance is high
-        if avg_imbalance > 10.0:
-            memories = await self._get_memories(user_id)
+        try:
+            # Get recent health data
+            health_logs = await self.db.get_user_health_logs(user_id, limit=7)
             
-            message = await self._generate_proactive_message(
-                user_id,
-                health_logs,
-                memories
-            )
+            if not health_logs:
+                return None
             
-            logger.info(f"Proactive check-in triggered for user {user_id} (imbalance: {avg_imbalance:.1f})")
+            # Calculate average imbalance score
+            avg_imbalance = sum(log["imbalance_score"] for log in health_logs) / len(health_logs)
             
-            return {
-                "agent_type": self.agent_id,
-                "response": message,
-                "timestamp": datetime.now().isoformat(),
-                "metadata": {
-                    "proactive": True,
-                    "trigger": "high_imbalance",
-                    "imbalance_score": round(avg_imbalance, 1),
-                    "memory_retrieved": [m.get("summary_text") for m in memories[:2]]
+            # Trigger proactive check-in if imbalance is high
+            if avg_imbalance > 10.0:
+                memories = await self._get_memories(user_id)
+                
+                # Generate proactive message using ADK
+                message = await self._generate_proactive_message(
+                    user_id,
+                    health_logs,
+                    memories
+                )
+                
+                logger.info(f"Proactive check-in triggered for user {user_id} (imbalance: {avg_imbalance:.1f})")
+                
+                return {
+                    "agent_type": self.agent_id,
+                    "response": message,
+                    "timestamp": datetime.now().isoformat(),
+                    "metadata": {
+                        "proactive": True,
+                        "trigger": "high_imbalance",
+                        "imbalance_score": round(avg_imbalance, 1),
+                        "memory_retrieved": [m.get("summary_text", "")[:50] for m in memories[:2]],
+                        "adk_powered": self.adk_agent is not None
+                    }
                 }
-            }
-        
-        return None
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in proactive outreach check: {e}", exc_info=True)
+            return None
     
     async def _get_memories(self, user_id: str) -> List[Dict]:
         """Retrieve long-term memory contexts for this agent"""
         if self.memory_service:
-            # Use Google ADK memory service
-            return await self.memory_service.get_agent_memories(user_id, self.agent_id)
+            return await self.memory_service.get_agent_memories(user_id, self.agent_id, limit=5)
         else:
-            # Fallback to database
             return await self.db.get_agent_memories(user_id, self.agent_id, limit=5)
     
-    async def _generate_response(
+    def _build_context_prompt(
+        self,
+        message: str,
+        memories: List[Dict],
+        health_logs: List[Dict]
+    ) -> str:
+        """Build enhanced prompt with context"""
+        prompt_parts = [f"User message: {message}"]
+        
+        # Add memory context
+        if memories:
+            memory_text = "\n".join([f"- {m.get('summary_text', '')}" for m in memories[:3]])
+            prompt_parts.append(f"\nPrevious context:\n{memory_text}")
+        
+        # Add health context
+        if health_logs:
+            latest = health_logs[0]
+            health_summary = (
+                f"\nRecent health data:\n"
+                f"- Sleep: {latest['sleep_hours']} hours\n"
+                f"- Screen time: {latest['screen_time']} hours\n"
+                f"- Imbalance score: {latest['imbalance_score']}"
+            )
+            prompt_parts.append(health_summary)
+        
+        return "\n".join(prompt_parts)
+    
+    async def _generate_adk_response(self, user_id: str, prompt: str) -> str:
+        """Generate response using ADK agent"""
+        try:
+            # ADK agents are executed via a Runner
+            from google.adk import Runner
+            from src.adk_types import Content, Part
+            
+            # Ensure session exists
+            session_id = f"session_{user_id}"
+            try:
+                await self.session_service.get_session(session_id)
+            except Exception:
+                await self.session_service.create_session(
+                    session_id=session_id,
+                    user_id=user_id,
+                    app_name="vibe_ceo"
+                )
+            
+            # Create runner with persistent session service
+            runner = Runner(
+                agent=self.adk_agent,
+                session_service=self.session_service,
+                app_name="vibe_ceo"
+            )
+            
+            full_response_text = ""
+            # Run the agent
+            async for chunk in runner.run_async(
+                user_id=user_id,
+                session_id=f"session_{user_id}",
+                new_message=Content(role="user", parts=[Part(text=prompt)])
+            ):
+                if isinstance(chunk, str):
+                    full_response_text += chunk
+                elif hasattr(chunk, "text"):
+                    full_response_text += chunk.text
+                elif isinstance(chunk, dict) and "text" in chunk:
+                    full_response_text += chunk["text"]
+                else:
+                    # Fallback for other types
+                    full_response_text += str(chunk)
+            
+            return full_response_text or "I'm here to support you."
+        except Exception as e:
+            logger.error(f"ADK response generation failed: {e}")
+            return "I'm having a moment, but I'm still here for you. How can I help?"
+    
+    async def _generate_fallback_response(
         self,
         user_id: str,
         message: str,
         memories: List[Dict],
         health_logs: List[Dict]
     ) -> str:
-        """
-        Generate empathetic response based on context
-        
-        This is a simplified version. In production, this would use
-        Google ADK's generative capabilities.
-        """
-        # Analyze message sentiment
+        """Fallback response when ADK is not available"""
         message_lower = message.lower()
-        
-        # Build context-aware response
         response_parts = []
         
         # Acknowledge user's feelings
@@ -162,21 +300,20 @@ class VibeAgent:
             response_parts.append("I'm glad to hear you're feeling positive!")
         
         # Reference memory if relevant
-        if memories and any(word in message_lower for word in ["work", "balance", "sleep"]):
+        if memories:
             memory_text = memories[0].get("summary_text", "")
-            if "work-life" in memory_text or "sleep" in memory_text:
-                response_parts.append(f"I remember we talked about this before. {memory_text}")
+            if any(word in message_lower for word in ["work", "balance", "sleep"]):
+                response_parts.append(f"I remember we discussed this before: {memory_text}")
         
-        # Provide health insights if available
+        # Provide health insights
         if health_logs:
-            latest_log = health_logs[0]
-            if latest_log["imbalance_score"] > 10:
+            latest = health_logs[0]
+            if latest["imbalance_score"] > 10:
                 response_parts.append(
-                    f"I've noticed your recent sleep has been around {latest_log['sleep_hours']}hours, "
-                    f"which might be contributing to how you feel. How about we work on improving that together?"
+                    f"I've noticed your sleep has been around {latest['sleep_hours']} hours. "
+                    "Let's work on improving that together."
                 )
         
-        # Always end with supportive message
         response_parts.append("I'm here to support you. What would help you most right now?")
         
         return " ".join(response_parts)
@@ -187,37 +324,75 @@ class VibeAgent:
         health_logs: List[Dict],
         memories: List[Dict]
     ) -> str:
-        """Generate proactive check-in message (FR1)"""
+        """Generate proactive check-in message"""
         latest_log = health_logs[0] if health_logs else None
         
-        # Build personalized proactive message
-        message_parts = [
-            "Hey! I wanted to check in with you.",
-        ]
+        if self.adk_agent and latest_log:
+            # Use ADK to generate personalized proactive message
+            prompt = f"""Generate a caring, proactive check-in message based on this health data:
+- Sleep: {latest_log['sleep_hours']} hours (last 7 days average)
+- Screen time: {latest_log['screen_time']} hours
+- Imbalance score: {latest_log['imbalance_score']}
+
+The user hasn't reached out, but the data suggests they might need support.
+Keep it warm, non-intrusive, and offer specific help."""
+            
+            try:
+                from google.adk import Runner
+                from src.adk_types import Content, Part
+                
+                session_id = f"proactive_{latest_log['user_id']}"
+                try:
+                    await self.session_service.get_session(session_id)
+                except Exception:
+                    await self.session_service.create_session(
+                        session_id=session_id,
+                        user_id=latest_log['user_id'],
+                        app_name="vibe_ceo"
+                    )
+                
+                runner = Runner(
+                    agent=self.adk_agent, 
+                    session_service=self.session_service,
+                    app_name="vibe_ceo"
+                )
+                
+                full_response_text = ""
+                async for chunk in runner.run_async(
+                    user_id=latest_log["user_id"],
+                    session_id=f"proactive_{latest_log['user_id']}",
+                    new_message=Content(role="user", parts=[Part(text=prompt)])
+                ):
+                    if isinstance(chunk, str):
+                        full_response_text += chunk
+                    elif hasattr(chunk, "text"):
+                        full_response_text += chunk.text
+                    elif isinstance(chunk, dict) and "text" in chunk:
+                        full_response_text += chunk["text"]
+                    else:
+                        full_response_text += str(chunk)
+                
+                return full_response_text or self._get_default_proactive_message(latest_log)
+            except:
+                return self._get_default_proactive_message(latest_log)
+        else:
+            return self._get_default_proactive_message(latest_log)
+    
+    def _get_default_proactive_message(self, latest_log: Optional[Dict]) -> str:
+        """Default proactive message"""
+        message_parts = ["Hey! I wanted to check in with you."]
         
         if latest_log:
             if latest_log["sleep_hours"] < 7:
                 message_parts.append(
-                    f"I noticed you've been getting around {latest_log['sleep_hours']} hours of sleep lately, "
-                    "which is less than ideal."
+                    f"I noticed you've been getting around {latest_log['sleep_hours']} hours of sleep lately."
                 )
-            
             if latest_log["screen_time"] > 8:
                 message_parts.append(
-                    f"Also, your screen time has been around {latest_log['screen_time']} hours, "
-                    "which might be affecting your well-being."
+                    f"Your screen time has been around {latest_log['screen_time']} hours."
                 )
         
-        # Reference relevant memories
-        if memories:
-            for memory in memories[:1]:
-                summary = memory.get("summary_text", "")
-                if "stress" in summary or "balance" in summary:
-                    message_parts.append(f"Considering what we discussed earlier about {summary.lower()}, ")
-                    message_parts.append("I thought it might be a good time to see how you're managing.")
-        
         message_parts.append("How are you feeling about things? Is there anything I can help with?")
-        
         return " ".join(message_parts)
     
     def _assess_health(self, health_logs: List[Dict]) -> Dict:

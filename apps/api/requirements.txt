@@ -1,19 +1,23 @@
-fastapi==0.115.0
-uvicorn[standard]==0.32.0
-websockets==13.1
-python-multipart==0.0.12
-python-dotenv==1.0.1
-pydantic==2.9.2
-pydantic-settings==2.6.1
+# Google ADK - Core framework for agent development (installed first for compatibility)
+google-adk>=0.1.0
 
-# Google Cloud & ADK
-google-cloud-aiplatform==1.73.0
-google-generativeai==0.8.3
+# FastAPI and server (updated for ADK compatibility)
+fastapi>=0.100.0
+uvicorn[standard]>=0.34.0
+websockets>=13.0
+python-multipart>=0.0.12
+python-dotenv>=1.0.0
+pydantic>=2.0
+pydantic-settings>=2.0
 
-# Database
-aiosqlite==0.20.0
+# Google Cloud & Vertex AI
+google-cloud-aiplatform>=1.73.0
+google-generativeai>=0.8.3
+
+# Database (updated for ADK compatibility)
+aiosqlite>=0.21.0
 
 # Testing
-pytest==8.3.3
-pytest-asyncio==0.24.0
-httpx==0.27.2
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
+httpx>=0.27.0
