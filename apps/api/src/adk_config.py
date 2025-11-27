@@ -28,12 +28,8 @@ class ADKConfig:
         self.temperature = float(os.getenv("ADK_TEMPERATURE", "0.7"))
         self.max_tokens = int(os.getenv("ADK_MAX_TOKENS", "8192"))
         
-        print('self.model', self.model)
-        print('self.temperature', self.temperature)
-        print('self.max_tokens', self.max_tokens)
-        print('self.project_id', self.project_id)
-        print('self.location', self.location)
-        print('self.credentials_path', self.credentials_path)
+
+        # Don't log full credentials path for security, just presence
         
         # Validate required configuration
         self._validate_config()

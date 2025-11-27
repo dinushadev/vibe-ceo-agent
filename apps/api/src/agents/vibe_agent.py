@@ -6,11 +6,11 @@ ADK-powered agent for emotional and health well-being monitoring
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime
-from google.adk.agents import LlmAgent
 
 from ..adk_config import create_agent
-from ..tools.adk_tools import VIBE_TOOLS, get_health_data
-from ..memory.memory_service import get_memory_service
+from ..tools.adk_tools import VIBE_TOOLS
+from .base_agent import BaseAgent
+from ..adk_utils import create_adk_runner
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ When analyzing health data:
 Always respond with empathy and encouragement."""
 
 
-class VibeAgent:
+class VibeAgent(BaseAgent):
     """
     The Vibe Agent focuses on emotional well-being and proactive check-ins
     Now powered by Google ADK for advanced reasoning and memory
@@ -54,13 +54,7 @@ class VibeAgent:
             db: Database instance for health logs
             memory_service: Optional memory service for long-term context
         """
-        self.db = db
-        self.memory_service = memory_service or get_memory_service(db)
-        self.agent_id = "vibe"
-        
-        # Initialize ADK Session Service
-        from google.adk.sessions import InMemorySessionService
-        self.session_service = InMemorySessionService()
+        super().__init__(db, agent_id="vibe", memory_service=memory_service)
         
         # Create ADK agent
         try:
@@ -106,8 +100,11 @@ class VibeAgent:
             enhanced_prompt = self._build_context_prompt(message, memories, health_logs)
             
             # Use ADK agent to generate response
+            tools_used = []
             if self.adk_agent:
-                response_text = await self._generate_adk_response(user_id, enhanced_prompt)
+                response_text, tools_used = await self._generate_adk_response(
+                    user_id, enhanced_prompt
+                )
             else:
                 # Fallback to basic response
                 response_text = await self._generate_fallback_response(
@@ -115,38 +112,24 @@ class VibeAgent:
                 )
             
             # Store interaction in memory
-            if self.memory_service:
-                await self.memory_service.summarize_interaction(
-                    user_id=user_id,
-                    agent_id=self.agent_id,
-                    user_message=message,
-                    agent_response=response_text
-                )
+            await self._store_interaction(user_id, message, response_text)
             
             # Calculate latency
             latency = int((datetime.now() - start_time).total_seconds() * 1000)
             
-            return {
-                "agent_type": self.agent_id,
-                "response": response_text,
-                "timestamp": datetime.now().isoformat(),
-                "metadata": {
+            return self._build_response_dict(
+                response_text,
+                {
                     "memory_retrieved": [m.get("summary_text", "")[:50] for m in memories[:2]],
-                    "tools_used": ["get_health_data"] if health_logs else [],
-                    "latency_ms": latency,
+                    "tools_used": tools_used,
                     "health_assessment": self._assess_health(health_logs) if health_logs else None,
-                    "adk_powered": self.adk_agent is not None
-                }
-            }
+                },
+                latency
+            )
         
         except Exception as e:
             logger.error(f"Error in Vibe Agent process_message: {e}", exc_info=True)
-            return {
-                "agent_type": self.agent_id,
-                "response": "I'm having trouble processing your message right now, but I'm here for you. Could you try rephrasing that?",
-                "timestamp": datetime.now().isoformat(),
-                "metadata": {"error": str(e)}
-            }
+            return self._build_error_response(e, "I'm having trouble processing your message right now, but I'm here for you. Could you try rephrasing that?")
     
     async def check_for_proactive_outreach(self, user_id: str) -> Optional[Dict]:
         """
@@ -201,13 +184,6 @@ class VibeAgent:
             logger.error(f"Error in proactive outreach check: {e}", exc_info=True)
             return None
     
-    async def _get_memories(self, user_id: str) -> List[Dict]:
-        """Retrieve long-term memory contexts for this agent"""
-        if self.memory_service:
-            return await self.memory_service.get_agent_memories(user_id, self.agent_id, limit=5)
-        else:
-            return await self.db.get_agent_memories(user_id, self.agent_id, limit=5)
-    
     def _build_context_prompt(
         self,
         message: str,
@@ -234,53 +210,6 @@ class VibeAgent:
             prompt_parts.append(health_summary)
         
         return "\n".join(prompt_parts)
-    
-    async def _generate_adk_response(self, user_id: str, prompt: str) -> str:
-        """Generate response using ADK agent"""
-        try:
-            # ADK agents are executed via a Runner
-            from google.adk import Runner
-            from src.adk_types import Content, Part
-            
-            # Ensure session exists
-            session_id = f"session_{user_id}"
-            try:
-                await self.session_service.get_session(session_id)
-            except Exception:
-                await self.session_service.create_session(
-                    session_id=session_id,
-                    user_id=user_id,
-                    app_name="vibe_ceo"
-                )
-            
-            # Create runner with persistent session service
-            runner = Runner(
-                agent=self.adk_agent,
-                session_service=self.session_service,
-                app_name="vibe_ceo"
-            )
-            
-            full_response_text = ""
-            # Run the agent
-            async for chunk in runner.run_async(
-                user_id=user_id,
-                session_id=f"session_{user_id}",
-                new_message=Content(role="user", parts=[Part(text=prompt)])
-            ):
-                if isinstance(chunk, str):
-                    full_response_text += chunk
-                elif hasattr(chunk, "text"):
-                    full_response_text += chunk.text
-                elif isinstance(chunk, dict) and "text" in chunk:
-                    full_response_text += chunk["text"]
-                else:
-                    # Fallback for other types
-                    full_response_text += str(chunk)
-            
-            return full_response_text or "I'm here to support you."
-        except Exception as e:
-            logger.error(f"ADK response generation failed: {e}")
-            return "I'm having a moment, but I'm still here for you. How can I help?"
     
     async def _generate_fallback_response(
         self,
@@ -338,41 +267,14 @@ The user hasn't reached out, but the data suggests they might need support.
 Keep it warm, non-intrusive, and offer specific help."""
             
             try:
-                from google.adk import Runner
-                from src.adk_types import Content, Part
-                
-                session_id = f"proactive_{latest_log['user_id']}"
-                try:
-                    await self.session_service.get_session(session_id)
-                except Exception:
-                    await self.session_service.create_session(
-                        session_id=session_id,
-                        user_id=latest_log['user_id'],
-                        app_name="vibe_ceo"
-                    )
-                
-                runner = Runner(
-                    agent=self.adk_agent, 
-                    session_service=self.session_service,
-                    app_name="vibe_ceo"
+                # Use shared utility to create runner and extract response
+                response_text, _ = await create_adk_runner(
+                    agent=self.adk_agent,
+                    user_id=latest_log["user_id"],
+                    prompt=prompt
                 )
                 
-                full_response_text = ""
-                async for chunk in runner.run_async(
-                    user_id=latest_log["user_id"],
-                    session_id=f"proactive_{latest_log['user_id']}",
-                    new_message=Content(role="user", parts=[Part(text=prompt)])
-                ):
-                    if isinstance(chunk, str):
-                        full_response_text += chunk
-                    elif hasattr(chunk, "text"):
-                        full_response_text += chunk.text
-                    elif isinstance(chunk, dict) and "text" in chunk:
-                        full_response_text += chunk["text"]
-                    else:
-                        full_response_text += str(chunk)
-                
-                return full_response_text or self._get_default_proactive_message(latest_log)
+                return response_text or self._get_default_proactive_message(latest_log)
             except:
                 return self._get_default_proactive_message(latest_log)
         else:

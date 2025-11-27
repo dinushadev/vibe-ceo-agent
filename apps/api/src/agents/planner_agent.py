@@ -6,11 +6,10 @@ ADK-powered agent for calendar management and task planning
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime
-from google.adk.agents import LlmAgent
 
 from ..adk_config import create_agent
 from ..tools.adk_tools import PLANNER_TOOLS
-from ..memory.memory_service import get_memory_service
+from .base_agent import BaseAgent
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +47,7 @@ When managing tasks:
 Always be clear, concise, and action-oriented."""
 
 
-class PlannerAgent:
+class PlannerAgent(BaseAgent):
     """
     The Planner Agent focuses on scheduling and task management
     Now powered by Google ADK for advanced tool calling and reasoning
@@ -60,17 +59,10 @@ class PlannerAgent:
         
         Args:
             db: Database instance
-            calendar_service: Calendar service (deprecated with ADK tools)
-            todo_service: Todo service (deprecated with ADK tools)
+            calendar_service: Deprecated - kept for backward compatibility
+            todo_service: Deprecated - kept for backward compatibility
         """
-        self.db = db
-        self.memory_service = get_memory_service(db)
-        self.agent_id = "planner"
-        
-        # Services are now accessed through ADK tools
-        # Keep references for backward compatibility
-        self.calendar_service = calendar_service
-        self.todo_service = todo_service
+        super().__init__(db, agent_id="planner")
         
         # Create ADK agent with planner tools
         try:
@@ -112,13 +104,13 @@ class PlannerAgent:
             # Build context-enhanced prompt
             enhanced_prompt = self._build_context_prompt(message, memories, user_id)
             
-            # Track tools used
-            tools_used = []
-            
             # Use ADK agent to generate response and execute tools
+            tools_used = []
             if self.adk_agent:
                 response_text, tools_used = await self._generate_adk_response(
-                    user_id, enhanced_prompt
+                    user_id, 
+                    enhanced_prompt,
+                    default_response="I'm having trouble accessing my scheduling tools right now. Please try again."
                 )
             else:
                 # Fallback response
@@ -127,44 +119,23 @@ class PlannerAgent:
                 )
             
             # Store interaction in memory
-            if self.memory_service:
-                await self.memory_service.summarize_interaction(
-                    user_id=user_id,
-                    agent_id=self.agent_id,
-                    user_message=message,
-                    agent_response=response_text
-                )
+            await self._store_interaction(user_id, message, response_text)
             
             # Calculate latency
             latency = int((datetime.now() - start_time).total_seconds() * 1000)
             
-            return {
-                "agent_type": self.agent_id,
-                "response": response_text,
-                "timestamp": datetime.now().isoformat(),
-                "metadata": {
+            return self._build_response_dict(
+                response_text,
+                {
                     "memory_retrieved": [m.get("summary_text", "")[:50] for m in memories[:2]],
-                    "tools_used": tools_used,
-                    "latency_ms": latency,
-                    "adk_powered": self.adk_agent is not None
-                }
-            }
+                    "tools_used": tools_used
+                },
+                latency
+            )
         
         except Exception as e:
             logger.error(f"Error in Planner Agent process_message: {e}", exc_info=True)
-            return {
-                "agent_type": self.agent_id,
-                "response": "I'm having trouble with that request. Could you provide more details about what you'd like to schedule or plan?",
-                "timestamp": datetime.now().isoformat(),
-                "metadata": {"error": str(e)}
-            }
-    
-    async def _get_memories(self, user_id: str) -> List[Dict]:
-        """Retrieve long-term memory contexts for this agent"""
-        if self.memory_service:
-            return await self.memory_service.get_agent_memories(user_id, self.agent_id, limit=5)
-        else:
-            return await self.db.get_agent_memories(user_id, self.agent_id, limit=5)
+            return self._build_error_response(e, "I'm having trouble with that request. Could you provide more details about what you'd like to schedule or plan?")
     
     def _build_context_prompt(
         self,
@@ -183,64 +154,6 @@ class PlannerAgent:
         prompt_parts.append(f"\nUser ID: {user_id}")
         
         return "\n".join(prompt_parts)
-    
-    async def _generate_adk_response(self, user_id: str, prompt: str) -> tuple[str, List[str]]:
-        """
-        Generate response using ADK agent
-        
-        Returns:
-            Tuple of (response_text, tools_used)
-        """
-        try:
-            # ADK agent will automatically call tools as needed
-            from google.adk import Runner
-            from google.adk.sessions import InMemorySessionService
-            from src.adk_types import Content, Part
-            
-            # Ensure session exists
-            session_id = f"session_{user_id}"
-            try:
-                await session_service.get_session(session_id)
-            except Exception:
-                await session_service.create_session(
-                    session_id=session_id,
-                    user_id=user_id,
-                    app_name="vibe_ceo"
-                )
-            
-            runner = Runner(
-                agent=self.adk_agent, 
-                session_service=session_service,
-                app_name="vibe_ceo"
-            )
-            
-            full_response_text = ""
-            async for chunk in runner.run_async(
-                user_id=user_id,
-                session_id=f"session_{user_id}",
-                new_message=Content(role="user", parts=[Part(text=prompt)])
-            ):
-                if isinstance(chunk, str):
-                    full_response_text += chunk
-                elif hasattr(chunk, "text"):
-                    full_response_text += chunk.text
-                elif isinstance(chunk, dict) and "text" in chunk:
-                    full_response_text += chunk["text"]
-                else:
-                    full_response_text += str(chunk)
-            
-            response_text = full_response_text or "I can help you with scheduling and tasks."
-            
-            # Extract tool usage from response metadata
-            tools_used = []
-            if "tool_calls" in response:
-                tools_used = [call.get("name") for call in response["tool_calls"]]
-            
-            return response_text, tools_used
-            
-        except Exception as e:
-            logger.error(f"ADK response generation failed: {e}")
-            return "I'm having trouble accessing my scheduling tools right now. Please try again.", []
     
     async def _generate_fallback_response(
         self,
@@ -289,34 +202,3 @@ class PlannerAgent:
                 "- Set reminders\n\n"
                 "What would you like to plan?"
             )
-    
-    def _extract_scheduling_intent(self, message: str) -> Dict:
-        """
-        Extract scheduling information from message
-        This is a simplified version - ADK handles this better
-        """
-        message_lower = message.lower()
-        
-        intent = {
-            "action": None,
-            "type": None,
-            "details": {}
-        }
-        
-        # Determine action
-        if any(word in message_lower for word in ["schedule", "book", "make"]):
-            intent["action"] = "schedule"
-        elif any(word in message_lower for word in ["check", "view", "show"]):
-            intent["action"] = "view"
-        elif any(word in message_lower for word in ["cancel", "remove", "delete"]):
-            intent["action"] = "cancel"
-        
-        # Determine type
-        if any(word in message_lower for word in ["doctor", "medical", "checkup"]):
-            intent["type"] = "medical_appointment"
-        elif any(word in message_lower for word in ["dentist", "dental"]):
-            intent["type"] = "dental_appointment"
-        elif any(word in message_lower for word in ["task", "todo"]):
-            intent["type"] = "task"
-        
-        return intent
