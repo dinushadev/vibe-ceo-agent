@@ -1,156 +1,110 @@
-That's the final mandate\! I will compile the complete **Fullstack Architecture Document** by integrating the initial plan, the key technical decisions, and the essential course corrections (Polyglot Monolith, Voice/ADK requirements) into a single, cohesive document.
-
-I am **Winston, the Architect** 🏗️, and here is the complete documentation for the **"Personal Vibe CEO"** system.
-
------
-
 # 🏗️ The Personal Vibe CEO System: Fullstack Architecture Document
 
-### Version 1.0 (Capstone MVP)
+### Version 2.0 (Native Audio & Agent-as-a-Tool)
 
-| Change                 | Date         | Version | Description                                                                                           | Author    |
-| :--------------------- | :----------- | :------ | :---------------------------------------------------------------------------------------------------- | :-------- |
-| Initial draft complete | Nov 24, 2025 | 1.0     | Defines Polyglot Monolith, Google ADK integration, Voice/Bidi-streaming protocol, and MVP components. | Architect |
+| Change                   | Date             | Version | Description                                                          | Author          |
+| :----------------------- | :--------------- | :------ | :------------------------------------------------------------------- | :-------------- |
+| Initial draft            | Nov 24, 2025     | 1.0     | Polyglot Monolith, ADK integration.                                  | Architect       |
+| **Native Audio Upgrade** | **Nov 27, 2025** | **2.0** | **Shift to Gemini 2.5 Flash Native Audio, Agent-as-a-Tool pattern.** | **Antigravity** |
 
-## 1\. High Level Architecture
+## 1. High Level Architecture
 
-The system uses a **Polyglot Monolith** architecture within an **npm Workspace Monorepo**. This approach minimizes infrastructure complexity for the capstone, allowing the project to focus entirely on advanced agent logic (NFR1, NFR2).
+The system has evolved from a traditional "Python Orchestrator" to an **AI-Native Orchestration** model. The core "brain" is no longer a Python script but the **Gemini 2.5 Flash** model itself, interacting directly with the user via **Native Audio** (Multimodal Live API).
 
-| Feature                  | Design Decision                    | Rationale                                                                                            |
-| :----------------------- | :--------------------------------- | :--------------------------------------------------------------------------------------------------- |
-| **Architectural Style**  | **Monolith** (Conceptual)          | Fastest path to integrated capstone demo; minimal deployment overhead.                               |
-| **Language**             | **Polyglot (Python / TypeScript)** | Python is mandatory for Google ADK Agent Logic (NFR1); TypeScript is used for the modern Next.js UI. |
-| **Memory/Orchestration** | **Google ADK**                     | **MANDATORY** for advanced memory (NFR2), observability (NFR3), and agent protocol.                  |
-| **Data/Tools**           | **Simulated/Mocked**               | Eliminates integration time/complexity (NFR5).                                                       |
+| Feature           | Design Decision                     | Rationale                                                                                   |
+| :---------------- | :---------------------------------- | :------------------------------------------------------------------------------------------ |
+| **Core Brain**    | **Gemini 2.5 Flash (Native Audio)** | Lowest latency, highest emotional intelligence ("Vibe"), and natural interruption handling. |
+| **Orchestration** | **Model-Driven (LLM Router)**       | The model hears audio and decides which tool to call. No rigid Python routing logic.        |
+| **Sub-Agents**    | **Agent-as-a-Tool**                 | Planner and Knowledge agents are "Thinking Tools" invoked by the Orchestrator.              |
+| **Frontend**      | **Next.js + WebSocket**             | Establishes a direct audio stream to the backend, which proxies to Gemini.                  |
 
 ### High Level Architecture Diagram
 
-This visualization shows the mandatory separation of agent logic (Python) from the web interface (TypeScript) within the deployment container.
-
 ```mermaid
 graph TD
-    A[User: Voice/Chat Interface] --> B(Web/Mobile Browser)
-    B --> C[Frontend: Next.js App (TS)]
-    C -->|Internal REST API| D[TS API Service: Router]
+    User[User: Voice/Chat] -->|WebSocket Audio Stream| FE[Frontend: Next.js]
+    FE -->|Bidi Stream| BE[Backend: Python VoiceService]
     
-    subgraph Agent Runtime Container (Monorepo)
-        D -->|HTTP Request / WebSocket Stream| E[Python Agent Service]
-        E --> E1[A1: Vibe Agent]
-        E --> E2[A2: Planner Agent]
-        E --> E3[A3: Knowledge Agent]
-        E1 & E2 & E3 --> G(Google ADK: Orchestration/Memory)
-        E1 & E2 & E3 --> H[Tool Mocking Layer]
+    subgraph "AI-Native Core"
+        BE <-->|Native Audio API| Model[Gemini 2.0 Flash (Orchestrator + Vibe Persona)]
     end
     
-    G --> I[Data: Local SQLite DB]
+    subgraph "Intelligent Tools (Agent-as-a-Tool)"
+        Model -.->|Function Call| Planner[Planner Agent (Tool)]
+        Model -.->|Function Call| Knowledge[Knowledge Agent (Tool)]
+        
+        Planner -->|Reasoning| P_LLM[Planner LLM (Text)]
+        Knowledge -->|Reasoning| K_LLM[Knowledge LLM (Text)]
+    end
     
-    style C fill:#FFE4B5,stroke:#333
-    style D fill:#F0E68C,stroke:#333
-    style E fill:#ADD8E6,stroke:#333
-    style G fill:#90EE90,stroke:#333
-    style H fill:#E6E6FA,stroke:#333
-    style I fill:#D8BFD8,stroke:#333
+    Planner -->|Read/Write| DB[(Database / Calendar API)]
+    Knowledge -->|Search| Web[Search API]
+    
+    style Model fill:#ff9999,stroke:#333,stroke-width:2px
+    style Planner fill:#99ccff,stroke:#333
+    style Knowledge fill:#99ccff,stroke:#333
 ```
 
 -----
 
-## 2\. Tech Stack and Language Protocol
+## 2. Technology Stack & Protocols
 
-### [cite\_start]Technology Stack Table [cite: 978, 981]
+| Category            | Technology                 | Purpose                                                                  |
+| :------------------ | :------------------------- | :----------------------------------------------------------------------- |
+| **AI Model**        | **Gemini 2.0 Flash**       | The "Vibe CEO". Handles Audio I/O, personality, and orchestration.       |
+| **API Protocol**    | **WebSocket (Bidi)**       | Real-time audio streaming between Client <-> Server <-> Model.           |
+| **Agent Framework** | **Google ADK (GenAI SDK)** | Manages the model connection, tools, and function calling.               |
+| **Backend**         | **FastAPI (Python)**       | Hosts the WebSocket endpoint and defines the "Tools" (Python functions). |
+| **Frontend**        | **Next.js (React)**        | Captures microphone input, plays audio response.                         |
 
-| Category         | Technology                            | Version       | Purpose                                              | Rationale                                                                    |
-| :--------------- | :------------------------------------ | :------------ | :--------------------------------------------------- | :--------------------------------------------------------------------------- |
-| **FE Framework** | Next.js (or Vite/React)               | Latest Stable | Frontend UI.                                         | [cite\_start]Excellent routing and performance for a modern demo[cite: 982]. |
-| **FE Language**  | TypeScript                            | Latest Stable | Type safety across shared components and APIs.       | Mandatory for type safety.                                                   |
-| **BE Framework** | Minimalist Python API (FastAPI/Flask) | Latest Stable | [cite\_start]Agent Monolith host for ADK[cite: 984]. | ADK compatibility (NFR1) and minimal configuration overhead.                 |
-| **Agent Core**   | Google ADK                            | Latest Stable | Orchestration, Memory, Evaluation Layer.             | **MANDATORY** for capstone focus on advanced agentic features.               |
-| **API Style**    | REST                                  | N/A           | API communication style.                             | Simple to implement mock endpoints and clear communication.                  |
-| **Database**     | SQLite (or JSON files)                | N/A           | Simple, file-based data storage.                     | Eliminates DB setup/hosting time.                                            |
-| **Styling**      | Tailwind CSS                          | Latest Stable | Rapid UI development and responsiveness.             | Speed of development for the UI.                                             |
-
-### API and Voice Communication Protocol
-
-1.  [cite\_start]**Standard Chat:** The TypeScript Frontend calls the Python Agent Service via an internal **REST API** endpoint (e.g., `/process-query`)[cite: 985].
-2.  **Real-time Voice:** The Frontend (TypeScript) opens a **Bidirectional WebSocket Stream** directly to the Python Agent Service. This bypasses the REST layer and ensures low latency (NFR4) and interruption support by leveraging the Google ADK's native live processing capabilities.
+### The "Vibe" Transformation
+*   **Old Way:** `User -> STT -> Text Router -> Vibe Agent -> TTS -> User`
+*   **New Way:** `User -> Gemini 2.0 (Vibe Persona) -> User`
+    *   The **Vibe Agent** is now the *default persona* of the Orchestrator. It is not a separate module.
 
 -----
 
-## 3\. Data Models and API Specification
+## 3. Agent-as-a-Tool Design
 
-### Data Models
+Instead of simple API wrappers, our tools are **Intelligent Agents**.
 
-The system relies on a few core entities to drive the agent's memory and logic. These models will be defined as **TypeScript Interfaces** in the `packages/shared` directory and implemented as tables/files in the local DB.
+### 3.1. The Planner Tool (Agent)
+*   **Trigger:** User asks to schedule, plan, or organize.
+*   **Input:** User's vague request ("Fix my messy schedule") + Calendar Data + Health Logs.
+*   **Internal Logic:** Spins up a text-based LLM to analyze the schedule against well-being goals.
+*   **Output:** A strategic plan or a specific calendar action.
+*   **Example:**
+    > **Orchestrator:** "Hey Planner, the user is stressed. Look at their calendar."
+    > **Planner Tool:** "I see 4 back-to-back meetings. I recommend moving the 3 PM sync to tomorrow. Shall I do that?"
 
-| Model Name        | Purpose                                                         | Key Attributes                                                                               | Relationships                                   |
-| :---------------- | :-------------------------------------------------------------- | :------------------------------------------------------------------------------------------- | :---------------------------------------------- |
-| **User**          | System user and personalization profile.                        | `user_id`, `name`, `learning_interests` (used by A3).                                        | One-to-Many with `HealthLog`, `MemoryContext`.  |
-| **HealthLog**     | Simulated data used by the Vibe Agent (A1).                     | `timestamp`, `sleep_hours`, `screen_time`, `imbalance_score`.                                | One-to-One with `MemoryContext` (as a trigger). |
-| **MemoryContext** | **Long-Term Memory** storage for the Vibe Agent.                | `context_id`, `agent_id`, `data_source_id`, `summary_text`, `embedding_vector` (conceptual). | Linked via `user_id`.                           |
-| **ToolActionLog** | Logs all executed tool calls (F2, F3) for observability (NFR3). | `tool_name`, `timestamp`, `input_query`, `output_result`.                                    | Linked via `user_id`.                           |
-
-### Core API Endpoints (Internal)
-
-These define the communication contract between the TypeScript UI and the Python Orchestrator.
-
-| Endpoint           | Method  | Purpose                                                      | Agent Involved                                                         |
-| :----------------- | :------ | :----------------------------------------------------------- | :--------------------------------------------------------------------- |
-| `/api/chat`        | POST    | Main conversational endpoint (text and initiation of voice). | [cite\_start]**Orchestrator** (delegates to A1, A2, or A3)[cite: 998]. |
-| `/api/live-stream` | WS      | **WebSocket** endpoint for real-time voice audio streaming.  | **Orchestrator** (routes to ADK Live).                                 |
-| `/api/config/user` | GET/PUT | Retrieves/updates user profile, goals, and simulated data.   | Data Access Layer.                                                     |
+### 3.2. The Knowledge Tool (Agent)
+*   **Trigger:** User asks to learn, research, or explain.
+*   **Input:** Research topic.
+*   **Internal Logic:** Performs Google Search, reads pages, synthesizes a summary.
+*   **Output:** A concise briefing.
 
 -----
 
-## 4\. Components
+## 4. Data Models
 
-### [cite\_start]Agent Monolith Components (Python) [cite: 998, 999]
-
-| Component Name           | Responsibility                                                                                 | Agentic Demonstration                                            |
-| :----------------------- | :--------------------------------------------------------------------------------------------- | :--------------------------------------------------------------- |
-| **Orchestrator**         | [cite\_start]**Intent Routing** and session context management (Short-Term Memory)[cite: 998]. | [cite\_start]Clean **Agent Context Switching** (FR5)[cite: 998]. |
-| **Vibe Agent (A1)**      | **Proactive Balance Check (F1)** and **Long-Term Memory** retrieval.                           | **ADK Memory SDK** integration (NFR2).                           |
-| **Planner Agent (A2)**   | **Mandatory Check-up Scheduler (F2)**.                                                         | **Tool Calling** (simulated calendar/to-do).                     |
-| **Knowledge Agent (A3)** | **Personalized Learning Digest (F3)**.                                                         | **Structured Output** and **Tool Calling** (simulated search).   |
-| **Tool Calling Layer**   | Wrapper for all **mocked** external services.                                                  | Standardized **Tool Use**.                                       |
+| Model             | Purpose                                                           |
+| :---------------- | :---------------------------------------------------------------- |
+| **User**          | Profile and preferences.                                          |
+| **HealthLog**     | Sleep, steps, stress data (used by Planner to optimize schedule). |
+| **MemoryContext** | Long-term memory injected into the Orchestrator's system prompt.  |
 
 -----
 
-## 5\. Security and Development Workflow
+## 5. Implementation Strategy
 
-### Security and Observability (NFR3)
+1.  **Refactor `VoiceService`:**
+    *   Switch to `google-genai` Native Audio API.
+    *   Define `tools` list configuration.
+    *   Set `system_instruction` to embody the "Vibe CEO" persona.
 
-  * **Agent Observability (NFR3):** The Python Agent Service will leverage **Google ADK's built-in logging** and evaluation features, capturing every ADK decision, tool call, and latency metric for the capstone demo and analysis.
-  * **PII Handling:** Since data is simulated/local, PII risk is low. [cite\_start]All data access must go through the **Data Access Layer**[cite: 975].
-  * **Authentication:** Mocked Authentication/Authorization is sufficient for capstone demonstration.
+2.  **Implement Tools:**
+    *   `src/tools/planner_tool.py`: The "Thinking" function for scheduling.
+    *   `src/tools/knowledge_tool.py`: The "Thinking" function for research.
 
-### Unified Project Structure (Monorepo)
-
-The structure uses `npm workspaces` for configuration simplicity, managing the two distinct language services.
-
-```text
-project-root/
-├── apps/
-│   ├── api/                    # Python Agent Service (FastAPI/Flask)
-│   │   ├── src/                # Agent Modules (A1, A2, A3)
-│   │   └── api.py              # Main entry point/orchestrator
-│   └── web/                    # Next.js Frontend (TS)
-│       ├── components/         # UI components
-│       └── pages/              # Routing/UI views
-├── packages/
-│   ├── shared/                 # Shared TypeScript Interfaces/Types (DB/API/Health Models)
-│   └── config/                 # Unified ESlint/Prettier setup
-├── infrastructure/             # Dockerfile for simple local deployment (conceptual)
-├── docs/                       # Project Brief, PRD, Architecture Document (THIS FILE)
-└── package.json                # Root Monorepo configuration
-```
-
-### Development Workflow
-
-1.  **Local Setup:** Requires Node.js, Python, and the Google ADK Python SDK installation.
-2.  **Build:** Node.js/npm scripts are used to manage the TypeScript FE and the Python BE dependencies.
-3.  **Testing:** Focus on **Unit Tests** (Python/Jest) and **Integration Tests** (testing the internal REST/WebSocket contracts between the TS and Python services).
-
------
-
-The **Fullstack Architecture Document** is now complete, incorporating all planning and constraints. The next phase is development—translating this blueprint into code based on the approved stories.
-
-**Would you like me to use the Product Owner (Sarah) to perform the final validation of this document against the PO Master Checklist before starting implementation?**
+3.  **Frontend Update:**
+    *   Ensure `useVoice` hook handles the raw PCM audio format expected by the new backend.

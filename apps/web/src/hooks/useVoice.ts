@@ -91,7 +91,7 @@ export function useVoice(): UseVoiceReturn {
     const playAudio = async (base64Audio: string): Promise<void> => {
         return new Promise(async (resolve) => {
             try {
-                console.log('Starting audio playback...');
+                // Decode base64 to raw binary
                 const audioData = atob(base64Audio);
                 const arrayBuffer = new ArrayBuffer(audioData.length);
                 const view = new Uint8Array(arrayBuffer);
@@ -100,21 +100,42 @@ export function useVoice(): UseVoiceReturn {
                 }
 
                 if (!audioContextRef.current) {
-                    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+                    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
+                        sampleRate: 24000, // Gemini Native Audio standard
+                    });
                 }
 
-                // Ensure context is running (browsers may suspend it)
+                // Ensure context is running
                 if (audioContextRef.current.state === 'suspended') {
                     await audioContextRef.current.resume();
                 }
 
-                const audioBuffer = await audioContextRef.current.decodeAudioData(arrayBuffer);
+                // Convert raw PCM (Int16) to AudioBuffer (Float32)
+                // Gemini sends 16-bit PCM, Little Endian
+                const int16Data = new Int16Array(arrayBuffer);
+                const float32Data = new Float32Array(int16Data.length);
+
+                for (let i = 0; i < int16Data.length; i++) {
+                    // Normalize Int16 (-32768 to 32767) to Float32 (-1.0 to 1.0)
+                    float32Data[i] = int16Data[i] / 32768.0;
+                }
+
+                // Create AudioBuffer
+                const audioBuffer = audioContextRef.current.createBuffer(
+                    1, // Mono
+                    float32Data.length,
+                    24000 // Sample Rate (Must match Gemini output)
+                );
+
+                // Copy data to channel
+                audioBuffer.getChannelData(0).set(float32Data);
+
+                // Play buffer
                 const source = audioContextRef.current.createBufferSource();
                 source.buffer = audioBuffer;
                 source.connect(audioContextRef.current.destination);
 
                 source.onended = () => {
-                    console.log('Audio playback finished');
                     isPlayingRef.current = false;
                     resolve();
                 };

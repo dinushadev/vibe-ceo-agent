@@ -316,54 +316,48 @@ async def websocket_endpoint(websocket: WebSocket):
             await audio_queue.put(None)
 
     async def process_audio():
-        """Process audio stream and send responses"""
-        try:
-            if not voice_service.speech_client:
-                logger.warning("Voice service not available, skipping transcription")
-                return
+        """Process audio stream and send responses using Native Audio"""
+        
+        while True:
+            try:
+                if not voice_service.client:
+                    logger.warning("Voice service not available, skipping processing")
+                    return
 
-            # Process the stream
-            async for result in voice_service.transcribe_stream(audio_generator()):
-                transcript = result["text"]
-                is_final = result["is_final"]
+                # Create the generator INSIDE the loop to reuse for new sessions
+                # This is critical because the previous session might have cancelled the generator
+                audio_gen = audio_generator()
+
+                logger.info("Starting VoiceService stream processing...")
+                # Process the stream with Native Audio
+                async for result in voice_service.process_audio_stream(audio_gen):
+                    audio_bytes = result.get("audio")
+                    
+                    if audio_bytes:
+                        # Send audio response directly
+                        audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
+                        await websocket.send_json({
+                            "type": "audio_response",
+                            "payload": audio_b64
+                        })
                 
-                # Send transcript to client (interim or final)
-                await websocket.send_json({
-                    "type": "transcript",
-                    "payload": {
-                        "text": transcript,
-                        "is_final": is_final
-                    }
-                })
+                # If the generator finishes normally (e.g. session ended by model), we loop back to reconnect
+                logger.info("Audio stream finished normally, reconnecting for next turn...")
                 
-                # Only process with agent if final
-                if is_final:
-                    logger.info(f"User said (final): {transcript}")
-                    
-                    # Get agent response
-                    # TODO: Add user_id to context if available
-                    response = await orchestrator.process_message("user_voice", transcript)
-                    agent_text = response.get("response", "")
-                    
-                    # Send text response
-                    await websocket.send_json({
-                        "type": "agent_response",
-                        "payload": response
-                    })
-                    
-                    # Synthesize and send audio
-                    if agent_text:
-                        audio_bytes = await voice_service.synthesize_speech(agent_text)
-                        if audio_bytes:
-                            # Send audio as base64
-                            audio_b64 = base64.b64encode(audio_bytes).decode('utf-8')
-                            await websocket.send_json({
-                                "type": "audio_response",
-                                "payload": audio_b64
-                            })
+                # Check if WebSocket is still open before reconnecting
+                if websocket.client_state == WebSocketDisconnect:
+                     logger.info("WebSocket client disconnected, stopping process_audio")
+                     break
                         
-        except Exception as e:
-            logger.error(f"Error processing audio: {e}")
+            except Exception as e:
+                logger.error(f"Error processing audio (will reconnect): {e}")
+                # Check if WebSocket is still open
+                if websocket.client_state == WebSocketDisconnect:
+                    logger.info("WebSocket closed, stopping process_audio")
+                    break
+                
+                # Brief pause before reconnecting to avoid tight loops
+                await asyncio.sleep(0.5)
 
     # Run receive and process loops concurrently
     try:

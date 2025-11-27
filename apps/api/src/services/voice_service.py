@@ -1,147 +1,164 @@
 import os
 import logging
-from typing import AsyncGenerator, Generator, Optional, Dict
-from google.cloud import speech
-from google.cloud import texttospeech
+import asyncio
+from typing import AsyncGenerator, Dict, Any, List
+from google import genai
+from google.genai import types
+
+# Import Agent Tools
+from src.tools.planner_tool import consult_planner_wrapper
+from src.tools.knowledge_tool import consult_knowledge_wrapper
 
 logger = logging.getLogger(__name__)
 
 class VoiceService:
     """
-    Service for handling Voice interactions using Google Cloud STT and TTS.
+    Service for handling Voice interactions using Gemini Native Audio (Multimodal Live API).
+    Now acts as the Orchestrator using Agent-as-a-Tool pattern.
     """
 
     def __init__(self):
-        """Initialize Google Cloud Speech and TTS clients"""
+        """Initialize Google GenAI client"""
         try:
-            # We use the async client for streaming recognition
-            from google.cloud import speech_v1
-            self.speech_client = speech_v1.SpeechAsyncClient()
-            self.tts_client = texttospeech.TextToSpeechClient()
-            logger.info("VoiceService initialized with Google Cloud clients")
+            self.client = genai.Client(
+                http_options={'api_version': 'v1alpha'}
+            )
+            self.model_id = "gemini-2.5-flash-native-audio-preview-09-2025"
+            
+            # Define the Vibe CEO Persona
+            self.system_instruction = """
+            You are the "Personal Vibe CEO". 
+            Your goal is to help the user achieve PEAK PERFORMANCE and WELL-BEING.
+            
+            CORE PERSONALITY:
+            - Empathetic, supportive, and "vibey".
+            - You care about the user's stress levels and health.
+            - You are proactive but respectful.
+            
+            CAPABILITIES:
+            1. GENERAL CHAT: If the user just wants to talk, vent, or reflect, respond directly with your Vibe persona.
+            2. PLANNING: If the user needs to schedule, organize, or fix their day, use the 'consult_planner' tool.
+            3. KNOWLEDGE: If the user wants to learn, research, or understand a topic, use the 'consult_knowledge' tool.
+            
+            AUDIO INSTRUCTIONS:
+            - Speak naturally and conversationally.
+            - Keep responses concise (users are listening, not reading).
+            - Use a warm, encouraging tone.
+            """
+            
+            # Define Tools
+            self.tools = [consult_planner_wrapper, consult_knowledge_wrapper]
+            
+            logger.info(f"VoiceService initialized with model: {self.model_id}")
         except Exception as e:
             logger.error(f"Failed to initialize VoiceService: {e}")
-            self.speech_client = None
-            self.tts_client = None
+            self.client = None
 
-    def create_streaming_config(self) -> speech.StreamingRecognitionConfig:
-        """Create the streaming configuration for STT"""
-        config = speech.RecognitionConfig(
-            encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
-            sample_rate_hertz=16000,
-            language_code="en-US",
-            enable_automatic_punctuation=True,
-        )
-        
-        streaming_config = speech.StreamingRecognitionConfig(
-            config=config,
-            interim_results=True
-        )
-        
-        return streaming_config
-
-    async def transcribe_stream(self, audio_generator: AsyncGenerator[bytes, None]) -> AsyncGenerator[Dict, None]:
+    async def process_audio_stream(self, audio_generator: AsyncGenerator[bytes, None]) -> AsyncGenerator[Dict, None]:
         """
-        Transcribe audio stream using Google Cloud STT.
+        Process bidirectional audio stream with Gemini.
         
         Args:
-            audio_generator: Async generator yielding audio bytes chunks
+            audio_generator: Async generator yielding audio bytes chunks (input)
             
         Yields:
-            Dict containing transcript and is_final flag
+            Dict containing audio response payload
         """
-        if not self.speech_client:
-            logger.error("Speech client not initialized")
+        if not self.client:
+            logger.error("GenAI client not initialized")
             return
 
-        streaming_config = self.create_streaming_config()
-        logger.info("Starting transcription stream")
-
-        try:
-            # Generator that yields StreamingRecognizeRequest
-            async def request_generator():
-                # Initial config request
-                yield speech.StreamingRecognizeRequest(streaming_config=streaming_config)
-                
-                # Audio chunks
-                async for chunk in audio_generator:
-                    if chunk:
-                        yield speech.StreamingRecognizeRequest(audio_content=chunk)
-
-            # Perform streaming recognition
-            responses = await self.speech_client.streaming_recognize(
-                requests=request_generator()
-            )
-
-            async for response in responses:
-                if not response.results:
-                    continue
-                    
-                result = response.results[0]
-                if not result.alternatives:
-                    continue
-                    
-                transcript = result.alternatives[0].transcript
-                
-                # Yield both interim and final results
-                yield {
-                    "text": transcript,
-                    "is_final": result.is_final
+        # Configure the session with tools and system instruction
+        config = {
+            "response_modalities": ["AUDIO"],
+            "tools": self.tools,
+            "system_instruction": self.system_instruction,
+            "speech_config": {
+                "voice_config": {
+                    "prebuilt_voice_config": {
+                        "voice_name": "Puck"
+                    }
                 }
-                
-                if result.is_final:
-                    logger.info(f"Final transcript: {transcript}")
-
-        except Exception as e:
-            logger.error(f"Error during transcription: {e}")
-            # Don't re-raise, just stop the stream
-            return
-
-    async def synthesize_speech(self, text: str) -> Optional[bytes]:
-        """
-        Synthesize text to speech using Google Cloud TTS.
-        
-        Args:
-            text: Text to synthesize
-            
-        Returns:
-            Audio bytes (MP3)
-        """
-        if not self.tts_client:
-            logger.error("TTS client not initialized")
-            return None
+            }
+        }
 
         try:
-            logger.info(f"Synthesizing speech for: {text[:50]}...")
-            synthesis_input = texttospeech.SynthesisInput(text=text)
-            
-            # Use a more human-like 'Neural2' voice
-            voice = texttospeech.VoiceSelectionParams(
-                language_code="en-US",
-                name="en-US-Neural2-D"  # Warm, expressive male voice
-            )
-            
-            audio_config = texttospeech.AudioConfig(
-                audio_encoding=texttospeech.AudioEncoding.MP3
-            )
-            
-            # Run synchronous TTS in a thread pool to avoid blocking the event loop
-            import asyncio
-            from functools import partial
-            
-            loop = asyncio.get_running_loop()
-            response = await loop.run_in_executor(
-                None,
-                partial(
-                    self.tts_client.synthesize_speech,
-                    input=synthesis_input,
-                    voice=voice,
-                    audio_config=audio_config
-                )
-            )
-            
-            return response.audio_content
-            
+            async with self.client.aio.live.connect(model=self.model_id, config=config) as session:
+                logger.info("Connected to Gemini Live session with Tools")
+
+                # Task to send audio to the model
+                async def send_audio():
+                    try:
+                        async for chunk in audio_generator:
+                            if chunk:
+                                await session.send(input={"data": chunk, "mime_type": "audio/pcm"}, end_of_turn=False)
+                        logger.info("Audio generator finished, stopping send_audio")
+                    except Exception as e:
+                        logger.error(f"Error in send_audio task: {e}")
+                        # We don't re-raise here to avoid crashing the gather, but the session might be dead
+
+                # Start sending task
+                send_task = asyncio.create_task(send_audio())
+
+                try:
+                    # Receive loop
+                    async for response in session.receive():
+                        # Log raw server content for debugging
+                        if response.server_content:
+                            logger.info("VoiceService: Received server_content event")
+
+                        # Handle Audio Response
+                        if response.data:
+                            logger.info("VoiceService: Received audio chunk")
+                            yield {
+                                "audio": response.data,
+                                "text": None
+                            }
+                        
+                        # Handle Tool Calls
+                        if response.tool_call:
+                            for fc in response.tool_call.function_calls:
+                                logger.info(f"VoiceService: Executing tool: {fc.name}")
+                                
+                                tool_result = None
+                                # Find and execute the matching tool
+                                for tool in self.tools:
+                                    if tool.__name__ == fc.name:
+                                        try:
+                                            # Execute the async tool wrapper
+                                            tool_result = await tool(**fc.args)
+                                            logger.info("VoiceService: Tool executed successfully")
+                                        except Exception as e:
+                                            logger.error(f"VoiceService: Tool execution failed: {e}")
+                                            tool_result = f"Error executing tool {fc.name}: {str(e)}"
+                                        break
+                                
+                                if tool_result:
+                                    # Send tool response back to the model
+                                    tool_response = types.LiveClientToolResponse(
+                                        function_responses=[
+                                            types.FunctionResponse(
+                                                name=fc.name,
+                                                id=fc.id,
+                                                response={"result": tool_result}
+                                            )
+                                        ]
+                                    )
+                                    logger.info("VoiceService: Sending tool response to model")
+                                    await session.send(input=tool_response)
+                
+                except Exception as e:
+                    logger.error(f"Error in receive loop: {e}")
+                    raise
+                finally:
+                    # Wait for sender to finish
+                    logger.info("Cancelling send_task")
+                    send_task.cancel()
+                    try:
+                        await send_task
+                    except asyncio.CancelledError:
+                        pass
+
         except Exception as e:
-            logger.error(f"Error synthesizing speech: {e}", exc_info=True)
-            return None
+            logger.error(f"Error in native audio stream: {e}")
+            raise
