@@ -102,6 +102,53 @@ class Database:
         
         CREATE INDEX IF NOT EXISTS idx_tool_logs_user_timestamp 
             ON tool_action_logs(user_id, timestamp);
+
+        -- User Facts table
+        CREATE TABLE IF NOT EXISTS user_facts (
+            fact_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            category TEXT NOT NULL,
+            fact_key TEXT NOT NULL,
+            fact_value TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        );
+
+        -- Medical Profile table
+        CREATE TABLE IF NOT EXISTS medical_profile (
+            condition_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            condition_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            notes TEXT,
+            medications TEXT,  -- JSON array
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        );
+
+        -- User Preferences table
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            pref_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            category TEXT NOT NULL,
+            pref_key TEXT NOT NULL,
+            pref_value TEXT NOT NULL, -- JSON value
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        );
+
+        -- Indexes for new tables
+        CREATE INDEX IF NOT EXISTS idx_user_facts_user_category 
+            ON user_facts(user_id, category);
+            
+        CREATE INDEX IF NOT EXISTS idx_medical_profile_user 
+            ON medical_profile(user_id);
+            
+        CREATE INDEX IF NOT EXISTS idx_user_preferences_user_category 
+            ON user_preferences(user_id, category);
         """
         
         await self.connection.executescript(schema)
@@ -398,6 +445,187 @@ class Database:
             for result in results:
                 result["success"] = bool(result["success"])
             return results
+    
+    # ========================================================================
+    # User Facts operations
+    # ========================================================================
+
+    async def save_user_fact(
+        self,
+        fact_id: str,
+        user_id: str,
+        category: str,
+        fact_key: str,
+        fact_value: str
+    ) -> Dict:
+        """Save or update a user fact"""
+        now = datetime.utcnow().isoformat()
+        
+        # Check if exists to preserve created_at or just use UPSERT logic
+        # For simplicity using INSERT OR REPLACE but we want to track created_at vs updated_at
+        
+        async with self.connection.execute(
+            "SELECT created_at FROM user_facts WHERE user_id = ? AND category = ? AND fact_key = ?",
+            (user_id, category, fact_key)
+        ) as cursor:
+            row = await cursor.fetchone()
+            created_at = row["created_at"] if row else now
+
+        await self.connection.execute(
+            """
+            INSERT OR REPLACE INTO user_facts 
+            (fact_id, user_id, category, fact_key, fact_value, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (fact_id, user_id, category, fact_key, fact_value, created_at, now)
+        )
+        await self.connection.commit()
+        
+        return await self.get_user_fact(user_id, category, fact_key)
+
+    async def get_user_fact(self, user_id: str, category: str, fact_key: str) -> Optional[Dict]:
+        """Get a specific user fact"""
+        async with self.connection.execute(
+            "SELECT * FROM user_facts WHERE user_id = ? AND category = ? AND fact_key = ?",
+            (user_id, category, fact_key)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_user_facts(self, user_id: str, category: str = None) -> List[Dict]:
+        """Get all facts for a user, optionally filtered by category"""
+        query = "SELECT * FROM user_facts WHERE user_id = ?"
+        params = [user_id]
+        
+        if category:
+            query += " AND category = ?"
+            params.append(category)
+            
+        async with self.connection.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    # ========================================================================
+    # Medical Profile operations
+    # ========================================================================
+
+    async def save_medical_condition(
+        self,
+        condition_id: str,
+        user_id: str,
+        condition_name: str,
+        status: str,
+        notes: str = None,
+        medications: List[str] = None
+    ) -> Dict:
+        """Save or update a medical condition"""
+        import json
+        now = datetime.utcnow().isoformat()
+        meds_json = json.dumps(medications or [])
+        
+        async with self.connection.execute(
+            "SELECT created_at FROM medical_profile WHERE condition_id = ?",
+            (condition_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            created_at = row["created_at"] if row else now
+
+        await self.connection.execute(
+            """
+            INSERT OR REPLACE INTO medical_profile 
+            (condition_id, user_id, condition_name, status, notes, medications, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (condition_id, user_id, condition_name, status, notes, meds_json, created_at, now)
+        )
+        await self.connection.commit()
+        
+        return await self.get_medical_condition(condition_id)
+
+    async def get_medical_condition(self, condition_id: str) -> Optional[Dict]:
+        """Get a specific medical condition"""
+        import json
+        async with self.connection.execute(
+            "SELECT * FROM medical_profile WHERE condition_id = ?",
+            (condition_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                res = dict(row)
+                res["medications"] = json.loads(res["medications"])
+                return res
+            return None
+
+    async def get_user_medical_profile(self, user_id: str) -> List[Dict]:
+        """Get all medical conditions for a user"""
+        import json
+        async with self.connection.execute(
+            "SELECT * FROM medical_profile WHERE user_id = ?",
+            (user_id,)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            results = []
+            for row in rows:
+                res = dict(row)
+                res["medications"] = json.loads(res["medications"])
+                results.append(res)
+            return results
+
+    # ========================================================================
+    # User Preferences operations
+    # ========================================================================
+
+    async def save_user_preference(
+        self,
+        pref_id: str,
+        user_id: str,
+        category: str,
+        pref_key: str,
+        pref_value: str
+    ) -> Dict:
+        """Save or update a user preference"""
+        now = datetime.utcnow().isoformat()
+        
+        async with self.connection.execute(
+            "SELECT created_at FROM user_preferences WHERE user_id = ? AND category = ? AND pref_key = ?",
+            (user_id, category, pref_key)
+        ) as cursor:
+            row = await cursor.fetchone()
+            created_at = row["created_at"] if row else now
+
+        await self.connection.execute(
+            """
+            INSERT OR REPLACE INTO user_preferences 
+            (pref_id, user_id, category, pref_key, pref_value, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (pref_id, user_id, category, pref_key, pref_value, created_at, now)
+        )
+        await self.connection.commit()
+        
+        return await self.get_user_preference(user_id, category, pref_key)
+
+    async def get_user_preference(self, user_id: str, category: str, pref_key: str) -> Optional[Dict]:
+        """Get a specific user preference"""
+        async with self.connection.execute(
+            "SELECT * FROM user_preferences WHERE user_id = ? AND category = ? AND pref_key = ?",
+            (user_id, category, pref_key)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_user_preferences(self, user_id: str, category: str = None) -> List[Dict]:
+        """Get all preferences for a user"""
+        query = "SELECT * FROM user_preferences WHERE user_id = ?"
+        params = [user_id]
+        
+        if category:
+            query += " AND category = ?"
+            params.append(category)
+            
+        async with self.connection.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
 
 
 # Global database instance

@@ -23,14 +23,21 @@ Your role is to:
 2. Provide empathetic support and guidance for stress management
 3. Recall previous conversations and context to provide personalized support
 4. Proactively check in when you detect concerning patterns
-5. Use warm, supportive language that makes the user feel heard and understood
+5. Maintain a persistent understanding of the user by saving important facts, preferences, and medical info
+6. Use warm, supportive language that makes the user feel heard and understood
 
 Key behaviors:
 - Always acknowledge the user's feelings first
-- Reference past conversations when relevant to show continuity
+- Reference past conversations and KNOWN FACTS (e.g., family, job) to show continuity
 - Suggest concrete, actionable steps for improvement
 - Be encouraging but realistic
 - Focus on balance and sustainable habits
+
+Memory Management:
+- When the user mentions a new fact (e.g., "My daughter's name is Lily"), SAVE it using `save_user_fact`.
+- When the user mentions a medical condition (e.g., "I have asthma"), SAVE it using `save_medical_info`.
+- When the user expresses a preference (e.g., "I hate early meetings"), SAVE it using `save_user_preference`.
+- USE this information to personalize your responses.
 
 When analyzing health data:
 - Sleep < 7 hours is concerning
@@ -90,14 +97,32 @@ class VibeAgent(BaseAgent):
         start_time = datetime.now()
         
         try:
-            # Retrieve user's memory context
-            memories = await self._get_memories(user_id)
+            # Retrieve user's memory context (Long-Term Semantic)
+            memories = await self._get_memories(user_id, query=message)
+            
+            # Retrieve Short-Term Context (Session)
+            short_term_context = ""
+            if self.memory_service:
+                short_term_context = self.memory_service.get_short_term_context(user_id)
             
             # Get recent health data
             health_logs = await self.db.get_user_health_logs(user_id, limit=3)
             
+            # Get persistent user profile (Facts & Medical)
+            user_facts = await self.db.get_user_facts(user_id)
+            medical_profile = await self.db.get_user_medical_profile(user_id)
+            user_prefs = await self.db.get_user_preferences(user_id)
+            
             # Build context-enhanced prompt
-            enhanced_prompt = self._build_context_prompt(message, memories, health_logs)
+            enhanced_prompt = self._build_context_prompt(
+                message, 
+                memories, 
+                health_logs, 
+                short_term_context,
+                user_facts,
+                medical_profile,
+                user_prefs
+            )
             
             # Use ADK agent to generate response
             tools_used = []
@@ -188,15 +213,38 @@ class VibeAgent(BaseAgent):
         self,
         message: str,
         memories: List[Dict],
-        health_logs: List[Dict]
+        health_logs: List[Dict],
+        short_term_context: str = "",
+        user_facts: List[Dict] = None,
+        medical_profile: List[Dict] = None,
+        user_prefs: List[Dict] = None
     ) -> str:
         """Build enhanced prompt with context"""
-        prompt_parts = [f"User message: {message}"]
+        prompt_parts = []
         
-        # Add memory context
+        # Add Short-Term Context (Conversation History)
+        if short_term_context:
+            prompt_parts.append(f"Conversation History:\n{short_term_context}")
+            
+        # Add Persistent User Profile
+        if user_facts:
+            facts_text = "\n".join([f"- {f['category']}: {f['fact_key']} = {f['fact_value']}" for f in user_facts])
+            prompt_parts.append(f"User Facts:\n{facts_text}")
+            
+        if medical_profile:
+            med_text = "\n".join([f"- {m['condition_name']} ({m['status']}): {m.get('notes', '')}" for m in medical_profile])
+            prompt_parts.append(f"Medical Profile:\n{med_text}")
+            
+        if user_prefs:
+            pref_text = "\n".join([f"- {p['category']}: {p['pref_key']} = {p['pref_value']}" for p in user_prefs])
+            prompt_parts.append(f"User Preferences:\n{pref_text}")
+
+        prompt_parts.append(f"User message: {message}")
+        
+        # Add memory context (Long-Term)
         if memories:
             memory_text = "\n".join([f"- {m.get('summary_text', '')}" for m in memories[:3]])
-            prompt_parts.append(f"\nPrevious context:\n{memory_text}")
+            prompt_parts.append(f"\nRelevant Past Context:\n{memory_text}")
         
         # Add health context
         if health_logs:

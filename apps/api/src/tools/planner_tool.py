@@ -13,6 +13,7 @@ from google.genai import types
 
 from src.db.database import get_database
 from src.tools.mock_tools import get_calendar_service, get_todo_service
+from src.memory.memory_service import get_memory_service
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,11 @@ class PlannerTool:
     def __init__(self):
         self.calendar_service = get_calendar_service()
         self.todo_service = get_todo_service()
+        # Initialize Memory Service (with DB connection handled lazily or globally)
+        # Note: get_memory_service requires a DB instance if not already initialized.
+        # We'll assume it's initialized by the main app startup.
+        self.memory_service = get_memory_service() 
+        self.model_id = "gemini-2.0-flash-exp"
         self.model_id = "gemini-2.0-flash-exp"
         
         try:
@@ -50,6 +56,13 @@ class PlannerTool:
         # 1. Gather Context Data
         db = await get_database()
         
+        # Get Memory Context
+        short_term_context = ""
+        long_term_memories = []
+        if self.memory_service:
+            short_term_context = self.memory_service.get_short_term_context(user_id)
+            long_term_memories = await self.memory_service.get_agent_memories(user_id, "planner", query=user_request)
+            
         # Get Calendar (Next 3 days)
         events = await self.calendar_service.get_upcoming_events(days_ahead=3)
         
@@ -67,6 +80,14 @@ class PlannerTool:
             "recent_health_logs": health_logs
         }, indent=2)
         
+        # Format memory string
+        memory_str = ""
+        if long_term_memories:
+            memory_str = "\nRELEVANT PAST PLANS:\n" + "\n".join([f"- {m.get('summary_text', '')}" for m in long_term_memories[:3]])
+        
+        if short_term_context:
+            memory_str += f"\n\nCURRENT CONVERSATION:\n{short_term_context}"
+        
         # 2. Reasoning with Secondary LLM
         if not self.client:
             logger.error("Planner Tool: GenAI client not initialized")
@@ -78,15 +99,19 @@ class PlannerTool:
         
         USER REQUEST: "{user_request}"
         
-        CONTEXT DATA:
+        MEMORY CONTEXT:
+        {memory_str}
+        
+        SYSTEM DATA:
         {context_str}
         
         INSTRUCTIONS:
         1. Analyze the schedule and health data. Look for conflicts, lack of breaks, or poor sleep.
-        2. Based on the user's request, propose a concrete plan.
-        3. If they asked to book/change something, confirm exactly what you would do (simulated).
-        4. Keep the response conversational but structured.
-        5. Do not output JSON. Output natural language to be spoken back to the user.
+        2. Consider the MEMORY CONTEXT to understand previous plans or preferences.
+        3. Based on the user's request, propose a concrete plan.
+        4. If they asked to book/change something, confirm exactly what you would do (simulated).
+        5. Keep the response conversational but structured.
+        6. Do not output JSON. Output natural language to be spoken back to the user.
         """
         
         logger.info(f"Planner Tool: Sending request to secondary model {self.model_id}")
@@ -99,6 +124,15 @@ class PlannerTool:
             
             plan = response.text
             logger.info("Planner Tool: Generated plan successfully")
+            
+            # 3. Store Interaction in Memory
+            if self.memory_service:
+                # Add to Short-Term
+                self.memory_service.add_to_short_term(user_id, "user", user_request)
+                self.memory_service.add_to_short_term(user_id, "model", plan)
+                # Add to Long-Term
+                await self.memory_service.summarize_interaction(user_id, "planner", user_request, plan)
+            
             return plan
             
         except Exception as e:

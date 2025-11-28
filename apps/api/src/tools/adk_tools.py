@@ -10,6 +10,13 @@ from google.adk.tools import FunctionTool
 
 # Import mock services for business logic
 from .mock_tools import get_calendar_service, get_search_service, get_todo_service
+from .memory_tools import (
+    save_user_fact,
+    get_user_profile,
+    save_medical_info,
+    get_medical_profile,
+    save_user_preference
+)
 
 logger = logging.getLogger(__name__)
 
@@ -273,7 +280,12 @@ KNOWLEDGE_TOOLS = [
 
 # Tools for Vibe Agent
 VIBE_TOOLS = [
-    get_health_data
+    get_health_data,
+    save_user_fact,
+    get_user_profile,
+    save_medical_info,
+    get_medical_profile,
+    save_user_preference
 ]
 
 # All available tools

@@ -39,20 +39,21 @@ class BaseAgent(ABC):
         self.memory_service = memory_service or get_memory_service(db)
         self.adk_agent = None  # To be set by subclass
     
-    async def _get_memories(self, user_id: str, limit: int = 5) -> List[Dict]:
+    async def _get_memories(self, user_id: str, limit: int = 5, query: str = None) -> List[Dict]:
         """
         Retrieve long-term memory contexts for this agent
         
         Args:
             user_id: User identifier
             limit: Maximum number of memories to retrieve
+            query: Optional query for semantic search
             
         Returns:
             List of memory dictionaries
         """
         if self.memory_service:
             return await self.memory_service.get_agent_memories(
-                user_id, self.agent_id, limit=limit
+                user_id, self.agent_id, limit=limit, query=query
             )
         else:
             return await self.db.get_agent_memories(
@@ -100,7 +101,7 @@ class BaseAgent(ABC):
         agent_response: str
     ):
         """
-        Store interaction in memory service
+        Store interaction in memory service (Short-Term & Long-Term)
         
         Args:
             user_id: User identifier
@@ -109,6 +110,11 @@ class BaseAgent(ABC):
         """
         if self.memory_service:
             try:
+                # 1. Add to Short-Term Memory
+                self.memory_service.add_to_short_term(user_id, "user", user_message)
+                self.memory_service.add_to_short_term(user_id, "model", agent_response)
+                
+                # 2. Add to Long-Term Memory (Summarized)
                 await self.memory_service.summarize_interaction(
                     user_id=user_id,
                     agent_id=self.agent_id,

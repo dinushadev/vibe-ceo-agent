@@ -11,6 +11,7 @@ from google import genai
 from google.genai import types
 
 from src.tools.mock_tools import get_search_service
+from src.memory.memory_service import get_memory_service
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ class KnowledgeTool:
     
     def __init__(self):
         self.search_service = get_search_service()
+        self.memory_service = get_memory_service()
         self.model_id = "gemini-2.0-flash-exp"
         
         try:
@@ -46,6 +48,15 @@ class KnowledgeTool:
         # 1. Perform Search
         search_results = await self.search_service.search(topic, max_results=3)
         
+        # Get Memory Context
+        short_term_context = ""
+        long_term_memories = []
+        if self.memory_service:
+            # Use a default user_id for MVP
+            user_id = "user_123" 
+            short_term_context = self.memory_service.get_short_term_context(user_id)
+            long_term_memories = await self.memory_service.get_agent_memories(user_id, "knowledge", query=topic)
+        
         # 2. Synthesize with Secondary LLM
         if not self.client:
             return "I'm having trouble accessing my knowledge base right now. Please try again later."
@@ -53,20 +64,32 @@ class KnowledgeTool:
         # Format results for context
         results_str = json.dumps(search_results, indent=2)
         
+        # Format memory string
+        memory_str = ""
+        if long_term_memories:
+            memory_str = "\nRELEVANT PAST LEARNINGS:\n" + "\n".join([f"- {m.get('summary_text', '')}" for m in long_term_memories[:3]])
+        
+        if short_term_context:
+            memory_str += f"\n\nCURRENT CONVERSATION:\n{short_term_context}"
+        
         prompt = f"""
         You are the Knowledge Agent for the Personal Vibe CEO system.
         Your goal is to explain complex topics simply and concisely.
         
         TOPIC: "{topic}"
         
+        MEMORY CONTEXT:
+        {memory_str}
+        
         SEARCH RESULTS:
         {results_str}
         
         INSTRUCTIONS:
         1. Synthesize the search results into a clear, easy-to-understand explanation.
-        2. Focus on the most relevant information for the user.
-        3. If the topic is related to health/well-being, emphasize practical tips.
-        4. Keep the response conversational and suitable for voice output (avoid complex lists or markdown).
+        2. Use the MEMORY CONTEXT to connect to previous topics if relevant.
+        3. Focus on the most relevant information for the user.
+        4. If the topic is related to health/well-being, emphasize practical tips.
+        5. Keep the response conversational and suitable for voice output (avoid complex lists or markdown).
         """
         
         try:
@@ -77,6 +100,16 @@ class KnowledgeTool:
             
             summary = response.text
             logger.info("Knowledge generated summary successfully")
+            
+            # 3. Store Interaction in Memory
+            if self.memory_service:
+                user_id = "user_123"
+                # Add to Short-Term
+                self.memory_service.add_to_short_term(user_id, "user", topic)
+                self.memory_service.add_to_short_term(user_id, "model", summary)
+                # Add to Long-Term
+                await self.memory_service.summarize_interaction(user_id, "knowledge", topic, summary)
+            
             return summary
             
         except Exception as e:

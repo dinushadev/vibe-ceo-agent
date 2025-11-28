@@ -13,7 +13,9 @@ from dotenv import load_dotenv
 # Import database and orchestrator
 from src.db.database import get_database
 from src.orchestrator import Orchestrator
+from src.orchestrator import Orchestrator
 from src.services.voice_service import VoiceService
+from src.memory.memory_service import get_memory_service
 import asyncio
 import base64
 
@@ -47,6 +49,10 @@ async def lifespan(app: FastAPI):
     # Initialize orchestrator with all agents
     orchestrator = Orchestrator(db)
     logger.info("Orchestrator and agents initialized")
+
+    # Initialize Memory Service (Singleton)
+    get_memory_service(db)
+    logger.info("Memory Service initialized")
 
     # Initialize Voice Service
     voice_service = VoiceService()
