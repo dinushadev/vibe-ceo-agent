@@ -326,9 +326,7 @@ async def websocket_endpoint(websocket: WebSocket):
         
         while True:
             try:
-                if not voice_service.client:
-                    logger.warning("Voice service not available, skipping processing")
-                    return
+
 
                 # Create the generator INSIDE the loop to reuse for new sessions
                 # This is critical because the previous session might have cancelled the generator

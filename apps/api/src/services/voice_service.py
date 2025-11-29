@@ -28,55 +28,64 @@ class VoiceService:
     """
 
     def __init__(self):
+        """Initialize VoiceService"""
+        self.model_id = "gemini-2.5-flash-native-audio-preview-09-2025"
+        self.memory_service = get_memory_service()
+        self.stt_service = AsyncSTTService()
+        self.stt_service = AsyncSTTService()
+        self.client = None
+        self.current_user_transcript = ""
+        self.current_model_response = ""
+        
+        # Define the Vibe CEO Persona
+        self.system_instruction = """
+        You are the "Personal Vibe CEO". 
+        Your goal is to help the user achieve PEAK PERFORMANCE and WELL-BEING.
+        
+        CORE PERSONALITY:
+        - Empathetic, supportive, and "vibey".
+        - You care about the user's stress levels and health.
+        - You are proactive but respectful.
+        
+        CAPABILITIES:
+        1. GENERAL CHAT: If the user just wants to talk, vent, or reflect, respond directly with your Vibe persona.
+        2. PLANNING: If the user needs to schedule, organize, or fix their day, use the 'consult_planner' tool.
+        3. KNOWLEDGE: If the user wants to learn, research, or understand a topic, use the 'consult_knowledge' tool.
+        
+        AUDIO INSTRUCTIONS:
+        - Speak naturally and conversationally.
+        - Keep responses concise (users are listening, not reading).
+        - Use a warm, encouraging tone.
+
+        MEMORY CAPABILITIES:
+        - You can REMEMBER facts, preferences, and medical info using tools.
+        - If the user tells you something important (e.g., "I'm allergic to peanuts"), SAVE it.
+        - Use `get_user_profile` to recall facts if needed.
+        """
+        
+        # Define Tools
+        self.tools = [
+            consult_planner_wrapper, 
+            consult_knowledge_wrapper,
+            save_user_fact,
+            get_user_profile,
+            save_medical_info,
+            get_medical_profile,
+            save_user_preference
+        ]
+        
+        # Attempt initial initialization
+        self._initialize_client()
+
+    def _initialize_client(self):
         """Initialize Google GenAI client"""
         try:
             self.client = genai.Client(
                 http_options={'api_version': 'v1alpha'}
             )
-            self.model_id = "gemini-2.5-flash-native-audio-preview-09-2025"
-            self.memory_service = get_memory_service()
-            self.stt_service = AsyncSTTService()
-            
-            # Define the Vibe CEO Persona
-            self.system_instruction = """
-            You are the "Personal Vibe CEO". 
-            Your goal is to help the user achieve PEAK PERFORMANCE and WELL-BEING.
-            
-            CORE PERSONALITY:
-            - Empathetic, supportive, and "vibey".
-            - You care about the user's stress levels and health.
-            - You are proactive but respectful.
-            
-            CAPABILITIES:
-            1. GENERAL CHAT: If the user just wants to talk, vent, or reflect, respond directly with your Vibe persona.
-            2. PLANNING: If the user needs to schedule, organize, or fix their day, use the 'consult_planner' tool.
-            3. KNOWLEDGE: If the user wants to learn, research, or understand a topic, use the 'consult_knowledge' tool.
-            
-            AUDIO INSTRUCTIONS:
-            - Speak naturally and conversationally.
-            - Keep responses concise (users are listening, not reading).
-            - Use a warm, encouraging tone.
-
-            MEMORY CAPABILITIES:
-            - You can REMEMBER facts, preferences, and medical info using tools.
-            - If the user tells you something important (e.g., "I'm allergic to peanuts"), SAVE it.
-            - Use `get_user_profile` to recall facts if needed.
-            """
-            
-            # Define Tools
-            self.tools = [
-                consult_planner_wrapper, 
-                consult_knowledge_wrapper,
-                save_user_fact,
-                get_user_profile,
-                save_medical_info,
-                get_medical_profile,
-                save_user_preference
-            ]
-            
             logger.info(f"VoiceService initialized with model: {self.model_id}")
         except Exception as e:
-            logger.error(f"Failed to initialize VoiceService: {e}")
+            logger.error(f"Failed to initialize VoiceService client: {e}")
             self.client = None
 
     async def process_audio_stream(self, audio_generator: AsyncGenerator[bytes, None]) -> AsyncGenerator[Dict, None]:
@@ -84,8 +93,11 @@ class VoiceService:
         Process bidirectional audio stream with Gemini.
         """
         if not self.client:
-            logger.error("GenAI client not initialized")
-            return
+            logger.warning("GenAI client not initialized, attempting to re-initialize...")
+            self._initialize_client()
+            
+        if not self.client:
+            raise RuntimeError("Failed to initialize GenAI client for audio streaming")
 
         # Configure the session with tools and system instruction
         
@@ -148,6 +160,7 @@ class VoiceService:
                             if transcript:
                                 logger.info(f"User said: {transcript}")
                                 # Store User Input in Memory
+                                self.current_user_transcript = transcript
                                 if self.memory_service:
                                     self.memory_service.add_to_short_term(user_id, "user", transcript)
 
@@ -179,6 +192,7 @@ class VoiceService:
                             for part in response.server_content.model_turn.parts:
                                 if part.text:
                                     text_content = part.text
+                                    self.current_model_response += text_content
                                     if self.memory_service:
                                         self.memory_service.add_to_short_term(user_id, "model", text_content)
 
@@ -189,6 +203,20 @@ class VoiceService:
                                 "audio": response.data,
                                 "text": None
                             }
+                        
+                        # Detect Turn End (simplistic: if we have both transcript and response)
+                        # In a real system, we might wait for a specific "turn_complete" signal or silence
+                        if response.server_content and response.server_content.turn_complete:
+                             logger.info("VoiceService: Turn complete, storing interaction")
+                             if self.current_user_transcript and self.current_model_response:
+                                 await self._store_interaction(
+                                     user_id, 
+                                     self.current_user_transcript, 
+                                     self.current_model_response
+                                 )
+                                 # Reset for next turn
+                                 self.current_user_transcript = ""
+                                 self.current_model_response = ""
                         
                         # Handle Tool Calls
                         if response.tool_call:
@@ -235,3 +263,27 @@ class VoiceService:
         except Exception as e:
             logger.error(f"Error in native audio stream: {e}")
             raise
+
+    async def _store_interaction(
+        self,
+        user_id: str,
+        user_message: str,
+        agent_response: str
+    ):
+        """
+        Store interaction in memory service (Short-Term & Long-Term)
+        """
+        if self.memory_service:
+            try:
+                # Note: Short-term is already added incrementally in the loop
+                
+                # Add to Long-Term Memory (Summarized)
+                await self.memory_service.summarize_interaction(
+                    user_id=user_id,
+                    agent_id="vibe", # Voice acts as Vibe agent
+                    user_message=user_message,
+                    agent_response=agent_response
+                )
+                logger.info("VoiceService: Interaction stored in long-term memory")
+            except Exception as e:
+                logger.error(f"Failed to store interaction in memory: {e}")
