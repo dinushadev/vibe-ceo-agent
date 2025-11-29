@@ -18,6 +18,10 @@ from src.tools.memory_tools import (
     get_medical_profile,
     save_user_preference
 )
+from src.tools.productivity_tools import (
+    collect_todo_item,
+    book_calendar_event
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +55,12 @@ class VoiceService:
         1. GENERAL CHAT: If the user just wants to talk, vent, or reflect, respond directly with your Vibe persona.
         2. PLANNING: If the user needs to schedule, organize, or fix their day, use the 'consult_planner' tool.
         3. KNOWLEDGE: If the user wants to learn, research, or understand a topic, use the 'consult_knowledge' tool.
+        4. PRODUCTIVITY (CRITICAL):
+           - Use 'collect_todo_item' to save tasks IMMEDIATELY when mentioned.
+           - Use 'book_calendar_event' to schedule meetings.
+           - IF MISSING INFO (e.g., time/date for meeting), ASK the user for it.
+           - Once you have the info, CALL THE TOOL IMMEDIATELY. Do not just say you will do it.
+           - Confirm to the user that it is "saved" or "booked" only AFTER calling the tool.
         
         AUDIO INSTRUCTIONS:
         - Speak naturally and conversationally.
@@ -71,7 +81,9 @@ class VoiceService:
             get_user_profile,
             save_medical_info,
             get_medical_profile,
-            save_user_preference
+            save_user_preference,
+            collect_todo_item,
+            book_calendar_event
         ]
         
         # Attempt initial initialization
@@ -104,6 +116,7 @@ class VoiceService:
         # 1. Fetch Memory Context
         user_id = "user_123" # Default for MVP
         memory_context = ""
+        personal_context = ""
         
         if self.memory_service:
             try:
@@ -113,10 +126,18 @@ class VoiceService:
                 # Get Long-Term (Vector) Context
                 long_term = await self.memory_service.get_agent_memories(user_id, "vibe", limit=3)
                 
-                if short_term or long_term:
-                    memory_context = "\n\nMEMORY CONTEXT:\n"
+                # Get Personal Context (Facts, Prefs, Medical, Tasks, Events)
+                personal_context = await self.memory_service.get_user_context(user_id)
+                
+                if short_term or long_term or personal_context:
+                    memory_context = "\n\nCONTEXT:\n"
+                    
+                    if personal_context:
+                        memory_context += f"{personal_context}\n"
+                    
                     if long_term:
                         memory_context += "Relevant Past Details:\n" + "\n".join([f"- {m.get('summary_text', '')}" for m in long_term]) + "\n"
+                    
                     if short_term:
                         memory_context += f"\n{short_term}"
             except Exception as e:

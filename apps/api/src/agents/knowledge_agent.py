@@ -149,21 +149,23 @@ class KnowledgeAgent(BaseAgent):
         self,
         message: str,
         memories: List[Dict],
-        user_profile: Optional[Dict]
+        user_id: str,
+        personal_context: str = ""
     ) -> str:
         """Build enhanced prompt with context"""
         prompt_parts = [f"User message: {message}"]
         
-        # Add user interests context
-        if user_profile and user_profile.get("learning_interests"):
-            interests = ", ".join(user_profile["learning_interests"])
-            prompt_parts.append(f"\nUser learning interests: {interests}")
-            prompt_parts.append("Tailor the content to align with these interests where possible.")
+        # Add personal context (especially interests)
+        if personal_context:
+            prompt_parts.append(f"\n{personal_context}")
         
         # Add memory context
         if memories:
             memory_text = "\n".join([f"- {m.get('summary_text', '')}" for m in memories[:3]])
-            prompt_parts.append(f"\nPrevious learning context:\n{memory_text}")
+            prompt_parts.append(f"\nPrevious research context:\n{memory_text}")
+        
+        prompt_parts.append(f"\nUser ID: {user_id}")
+        prompt_parts.append("Tailor the content to align with these interests where possible.")
         
         return "\n".join(prompt_parts)
     

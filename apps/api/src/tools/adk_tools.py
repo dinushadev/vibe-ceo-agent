@@ -1,6 +1,6 @@
 """
 ADK Tool Definitions
-Converts mock tools to ADK-compatible format using FunctionTool
+Converts tools to ADK-compatible format using FunctionTool
 """
 
 import logging
@@ -8,8 +8,16 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 from google.adk.tools import FunctionTool
 
-# Import mock services for business logic
-from .mock_tools import get_calendar_service, get_search_service, get_todo_service
+# Import productivity tools (DB-backed)
+from .productivity_tools import (
+    book_calendar_event,
+    get_upcoming_events as get_events_impl,
+    check_availability as check_avail_impl,
+    collect_todo_item,
+    get_pending_tasks as get_tasks_impl,
+    complete_task as complete_task_impl
+)
+
 from .memory_tools import (
     save_user_fact,
     get_user_profile,
@@ -18,21 +26,13 @@ from .memory_tools import (
     save_user_preference
 )
 
+# Import mock search for now (until we have a real one)
+from .mock_tools import get_search_service
+
 logger = logging.getLogger(__name__)
 
 # Initialize services
-_calendar_service = None
 _search_service = None
-_todo_service = None
-
-
-def _get_calendar():
-    """Lazy initialization of calendar service"""
-    global _calendar_service
-    if _calendar_service is None:
-        _calendar_service = get_calendar_service()
-    return _calendar_service
-
 
 def _get_search():
     """Lazy initialization of search service"""
@@ -42,20 +42,12 @@ def _get_search():
     return _search_service
 
 
-def _get_todo():
-    """Lazy initialization of todo service"""
-    global _todo_service
-    if _todo_service is None:
-        _todo_service = get_todo_service()
-    return _todo_service
-
-
 # ============================================================================
 # Calendar Tools
 # ============================================================================
 
 
-def schedule_appointment(
+async def schedule_appointment(
     title: str,
     date: str,
     time: str,
@@ -76,13 +68,14 @@ def schedule_appointment(
         Confirmation with appointment ID and details
     """
     try:
-        calendar = _get_calendar()
-        result = calendar.schedule_appointment(
+        # Combine date and time for book_calendar_event
+        start_time = f"{date}T{time}:00"
+        
+        result = await book_calendar_event(
             title=title,
-            date=date,
-            time=time,
-            duration_minutes=duration_minutes,
-            description=description
+            start_time=start_time,
+            description=description,
+            duration_minutes=duration_minutes
         )
         logger.info(f"Scheduled appointment: {title} on {date} at {time}")
         return result
@@ -92,7 +85,7 @@ def schedule_appointment(
 
 
 
-def get_upcoming_appointments(days_ahead: int = 7) -> List[Dict]:
+async def get_upcoming_appointments(days_ahead: int = 7) -> List[Dict]:
     """
     Retrieve upcoming appointments from the calendar.
     
@@ -103,17 +96,17 @@ def get_upcoming_appointments(days_ahead: int = 7) -> List[Dict]:
         List of upcoming appointments
     """
     try:
-        calendar = _get_calendar()
-        appointments = calendar.get_upcoming_appointments(days_ahead)
-        logger.info(f"Retrieved {len(appointments)} upcoming appointments")
-        return appointments
+        result = await get_events_impl(days_ahead=days_ahead)
+        if result.get("status") == "success":
+            return result.get("events", [])
+        return []
     except Exception as e:
         logger.error(f"Failed to get appointments: {e}")
         return []
 
 
 
-def check_availability(date: str, start_time: str, end_time: str) -> Dict:
+async def check_availability(date: str, start_time: str, end_time: str) -> Dict:
     """
     Check if a time slot is available in the calendar.
     
@@ -126,9 +119,7 @@ def check_availability(date: str, start_time: str, end_time: str) -> Dict:
         Availability status and conflicting appointments if any
     """
     try:
-        calendar = _get_calendar()
-        result = calendar.check_availability(date, start_time, end_time)
-        logger.info(f"Checked availability for {date} {start_time}-{end_time}: {result['available']}")
+        result = await check_avail_impl(date, start_time, end_time)
         return result
     except Exception as e:
         logger.error(f"Failed to check availability: {e}")
@@ -140,7 +131,7 @@ def check_availability(date: str, start_time: str, end_time: str) -> Dict:
 # ============================================================================
 
 
-def create_task(title: str, priority: str = "medium", due_date: Optional[str] = None) -> Dict:
+async def create_task(title: str, priority: str = "medium", due_date: Optional[str] = None) -> Dict:
     """
     Create a new task in the todo list.
     
@@ -153,8 +144,11 @@ def create_task(title: str, priority: str = "medium", due_date: Optional[str] = 
         Created task details with task ID
     """
     try:
-        todo = _get_todo()
-        result = todo.add_task(title=title, priority=priority, due_date=due_date)
+        result = await collect_todo_item(
+            title=title,
+            priority=priority,
+            due_date=due_date
+        )
         logger.info(f"Created task: {title} (priority: {priority})")
         return result
     except Exception as e:
@@ -163,7 +157,7 @@ def create_task(title: str, priority: str = "medium", due_date: Optional[str] = 
 
 
 
-def get_pending_tasks(priority: Optional[str] = None) -> List[Dict]:
+async def get_pending_tasks(priority: Optional[str] = None) -> List[Dict]:
     """
     Get all pending tasks from the todo list.
     
@@ -174,17 +168,17 @@ def get_pending_tasks(priority: Optional[str] = None) -> List[Dict]:
         List of pending tasks
     """
     try:
-        todo = _get_todo()
-        tasks = todo.get_pending_tasks(priority_filter=priority)
-        logger.info(f"Retrieved {len(tasks)} pending tasks")
-        return tasks
+        result = await get_tasks_impl(priority=priority)
+        if result.get("status") == "success":
+            return result.get("tasks", [])
+        return []
     except Exception as e:
         logger.error(f"Failed to get tasks: {e}")
         return []
 
 
 
-def complete_task(task_id: str) -> Dict:
+async def complete_task(task_id: str) -> Dict:
     """
     Mark a task as completed.
     
@@ -195,8 +189,7 @@ def complete_task(task_id: str) -> Dict:
         Confirmation of task completion
     """
     try:
-        todo = _get_todo()
-        result = todo.complete_task(task_id)
+        result = await complete_task_impl(task_id)
         logger.info(f"Completed task: {task_id}")
         return result
     except Exception as e:

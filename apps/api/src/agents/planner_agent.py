@@ -141,10 +141,15 @@ class PlannerAgent(BaseAgent):
         self,
         message: str,
         memories: List[Dict],
-        user_id: str
+        user_id: str,
+        personal_context: str = ""
     ) -> str:
         """Build enhanced prompt with context"""
         prompt_parts = [f"User message: {message}"]
+        
+        # Add personal context (especially tasks and events)
+        if personal_context:
+            prompt_parts.append(f"\n{personal_context}")
         
         # Add memory context
         if memories:

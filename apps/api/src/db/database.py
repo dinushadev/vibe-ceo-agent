@@ -18,7 +18,18 @@ class Database:
     def __init__(self, db_path: str = None):
         """Initialize database connection"""
         if db_path is None:
-            db_path = os.getenv("DATABASE_PATH", "./data/vibe_ceo.db")
+            # Resolve absolute path to ensure persistence across restarts
+            # Current file: apps/api/src/db/database.py
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # API root: apps/api
+            api_root = os.path.dirname(os.path.dirname(current_dir))
+            data_dir = os.path.join(api_root, "data")
+            
+            # Ensure data directory exists
+            os.makedirs(data_dir, exist_ok=True)
+            
+            default_path = os.path.join(data_dir, "vibe_ceo.db")
+            db_path = os.getenv("DATABASE_PATH", default_path)
         
         self.db_path = db_path
         self.connection = None
@@ -149,6 +160,43 @@ class Database:
             
         CREATE INDEX IF NOT EXISTS idx_user_preferences_user_category 
             ON user_preferences(user_id, category);
+
+        -- Todos table
+        CREATE TABLE IF NOT EXISTS todos (
+            task_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            priority TEXT DEFAULT 'medium',
+            due_date TEXT,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            completed_at TEXT,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        );
+
+        -- Calendar Events table
+        CREATE TABLE IF NOT EXISTS calendar_events (
+            event_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            location TEXT,
+            status TEXT DEFAULT 'scheduled',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        );
+
+        -- Indexes for productivity tables
+        CREATE INDEX IF NOT EXISTS idx_todos_user_status 
+            ON todos(user_id, status);
+            
+        CREATE INDEX IF NOT EXISTS idx_calendar_events_user_time 
+            ON calendar_events(user_id, start_time);
         """
         
         await self.connection.executescript(schema)
@@ -627,6 +675,143 @@ class Database:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
 
+
+    # ========================================================================
+    # Todo operations
+    # ========================================================================
+
+    async def create_task(
+        self,
+        task_id: str,
+        user_id: str,
+        title: str,
+        description: str = None,
+        priority: str = "medium",
+        due_date: str = None
+    ) -> Dict:
+        """Create a new task"""
+        now = datetime.utcnow().isoformat()
+        
+        await self.connection.execute(
+            """
+            INSERT INTO todos 
+            (task_id, user_id, title, description, priority, due_date, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+            """,
+            (task_id, user_id, title, description, priority, due_date, now, now)
+        )
+        await self.connection.commit()
+        
+        return await self.get_task(task_id)
+
+    async def get_task(self, task_id: str) -> Optional[Dict]:
+        """Get task by ID"""
+        async with self.connection.execute(
+            "SELECT * FROM todos WHERE task_id = ?",
+            (task_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_user_tasks(self, user_id: str, status: str = None) -> List[Dict]:
+        """Get tasks for a user, optionally filtered by status"""
+        query = "SELECT * FROM todos WHERE user_id = ?"
+        params = [user_id]
+        
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+            
+        query += " ORDER BY created_at DESC"
+        
+        async with self.connection.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def update_task_status(self, task_id: str, status: str) -> Optional[Dict]:
+        """Update task status"""
+        now = datetime.utcnow().isoformat()
+        completed_at = now if status == "completed" else None
+        
+        await self.connection.execute(
+            """
+            UPDATE todos 
+            SET status = ?, updated_at = ?, completed_at = ?
+            WHERE task_id = ?
+            """,
+            (status, now, completed_at, task_id)
+        )
+        await self.connection.commit()
+        
+        return await self.get_task(task_id)
+
+    # ========================================================================
+    # Calendar Event operations
+    # ========================================================================
+
+    async def create_event(
+        self,
+        event_id: str,
+        user_id: str,
+        title: str,
+        start_time: str,
+        end_time: str,
+        description: str = None,
+        location: str = None
+    ) -> Dict:
+        """Create a new calendar event"""
+        now = datetime.utcnow().isoformat()
+        
+        await self.connection.execute(
+            """
+            INSERT INTO calendar_events 
+            (event_id, user_id, title, description, start_time, end_time, location, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)
+            """,
+            (event_id, user_id, title, description, start_time, end_time, location, now, now)
+        )
+        await self.connection.commit()
+        
+        return await self.get_event(event_id)
+
+    async def get_event(self, event_id: str) -> Optional[Dict]:
+        """Get event by ID"""
+        async with self.connection.execute(
+            "SELECT * FROM calendar_events WHERE event_id = ?",
+            (event_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_user_events(self, user_id: str, start_after: str = None) -> List[Dict]:
+        """Get upcoming events for a user"""
+        query = "SELECT * FROM calendar_events WHERE user_id = ? AND status != 'cancelled'"
+        params = [user_id]
+        
+        if start_after:
+            query += " AND start_time >= ?"
+            params.append(start_after)
+            
+        query += " ORDER BY start_time ASC"
+        
+        async with self.connection.execute(query, params) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows]
+
+    async def cancel_event(self, event_id: str) -> bool:
+        """Cancel an event"""
+        now = datetime.utcnow().isoformat()
+        
+        await self.connection.execute(
+            """
+            UPDATE calendar_events 
+            SET status = 'cancelled', updated_at = ?
+            WHERE event_id = ?
+            """,
+            (now, event_id)
+        )
+        await self.connection.commit()
+        return True
 
 # Global database instance
 db_instance = None

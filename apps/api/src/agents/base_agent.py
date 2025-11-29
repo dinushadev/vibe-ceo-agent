@@ -94,6 +94,24 @@ class BaseAgent(ABC):
             logger.error(f"ADK response generation failed for {self.agent_id}: {e}")
             return default_response, []
     
+    async def _get_personal_context(self, user_id: str) -> str:
+        """
+        Get comprehensive personal context for the user
+        
+        Args:
+            user_id: User identifier
+            
+        Returns:
+            Formatted personal context string
+        """
+        if self.memory_service:
+            try:
+                return await self.memory_service.get_user_context(user_id)
+            except Exception as e:
+                logger.error(f"Failed to get personal context: {e}")
+                return ""
+        return ""
+    
     async def _store_interaction(
         self,
         user_id: str,

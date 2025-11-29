@@ -213,49 +213,30 @@ class VibeAgent(BaseAgent):
         self,
         message: str,
         memories: List[Dict],
-        health_logs: List[Dict],
-        short_term_context: str = "",
-        user_facts: List[Dict] = None,
-        medical_profile: List[Dict] = None,
-        user_prefs: List[Dict] = None
+        user_id: str,
+        health_data: Optional[Dict] = None,
+        personal_context: str = ""
     ) -> str:
-        """Build enhanced prompt with context"""
-        prompt_parts = []
+        """Build enhanced prompt with health context and memories"""
+        prompt_parts = [f"User message: {message}"]
         
-        # Add Short-Term Context (Conversation History)
-        if short_term_context:
-            prompt_parts.append(f"Conversation History:\n{short_term_context}")
-            
-        # Add Persistent User Profile
-        if user_facts:
-            facts_text = "\n".join([f"- {f['category']}: {f['fact_key']} = {f['fact_value']}" for f in user_facts])
-            prompt_parts.append(f"User Facts:\n{facts_text}")
-            
-        if medical_profile:
-            med_text = "\n".join([f"- {m['condition_name']} ({m['status']}): {m.get('notes', '')}" for m in medical_profile])
-            prompt_parts.append(f"Medical Profile:\n{med_text}")
-            
-        if user_prefs:
-            pref_text = "\n".join([f"- {p['category']}: {p['pref_key']} = {p['pref_value']}" for p in user_prefs])
-            prompt_parts.append(f"User Preferences:\n{pref_text}")
-
-        prompt_parts.append(f"User message: {message}")
+        # Add personal context (facts, preferences, medical, tasks, events)
+        if personal_context:
+            prompt_parts.append(f"\n{personal_context}")
         
-        # Add memory context (Long-Term)
+        # Add health data if available
+        if health_data:
+            prompt_parts.append(f"\nRecent health metrics:")
+            prompt_parts.append(f"- Sleep: {health_data.get('sleep_hours', 'N/A')} hours")
+            prompt_parts.append(f"- Screen time: {health_data.get('screen_time', 'N/A')} hours")
+            prompt_parts.append(f"- Balance score: {health_data.get('imbalance_score', 'N/A')}/10")
+        
+        # Add memory context
         if memories:
             memory_text = "\n".join([f"- {m.get('summary_text', '')}" for m in memories[:3]])
-            prompt_parts.append(f"\nRelevant Past Context:\n{memory_text}")
+            prompt_parts.append(f"\nPrevious interactions:\n{memory_text}")
         
-        # Add health context
-        if health_logs:
-            latest = health_logs[0]
-            health_summary = (
-                f"\nRecent health data:\n"
-                f"- Sleep: {latest['sleep_hours']} hours\n"
-                f"- Screen time: {latest['screen_time']} hours\n"
-                f"- Imbalance score: {latest['imbalance_score']}"
-            )
-            prompt_parts.append(health_summary)
+        prompt_parts.append(f"\nUser ID: {user_id}")
         
         return "\n".join(prompt_parts)
     
