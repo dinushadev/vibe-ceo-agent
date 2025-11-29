@@ -36,49 +36,29 @@ export default function AgentStatus({ currentAgent, isLoading }: AgentStatusProp
     const agent = currentAgent ? agentConfig[currentAgent] : null;
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 mb-6">
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <div className="text-2xl">{agent?.icon || '🤖'}</div>
-                    <div>
-                        <h3 className="font-semibold text-gray-900 dark:text-white">
-                            {agent ? `${agent.name} Agent` : 'Personal Vibe CEO'}
-                        </h3>
-                        <p className="text-sm text-gray-500 dark:text-gray-400">
-                            {agent?.description || 'Ready to help'}
-                        </p>
-                    </div>
+        <div className="glass-card rounded-xl px-4 py-3 mb-2 flex items-center justify-between transition-all duration-300">
+            <div className="flex items-center gap-3">
+                <div className="text-xl filter drop-shadow-sm">{agent?.icon || '🤖'}</div>
+                <div>
+                    <h3 className="font-medium text-sm text-foreground">
+                        {agent ? `${agent.name} Agent` : 'Personal Vibe CEO'}
+                    </h3>
+                    <p className="text-xs text-muted-foreground">
+                        {agent?.description || 'Ready to help'}
+                    </p>
                 </div>
-
-                {isLoading && (
-                    <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse delay-75"></div>
-                        <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse delay-150"></div>
-                    </div>
-                )}
-
-                {agent && !isLoading && (
-                    <div className={`px-3 py-1 rounded-full bg-gradient-to-r ${agent.color} text-white text-sm font-medium`}>
-                        Active
-                    </div>
-                )}
             </div>
 
-            {/* Agent indicators */}
-            <div className="flex gap-2 mt-4">
-                {Object.entries(agentConfig).map(([type, config]) => (
-                    <div
-                        key={type}
-                        className={`flex-1 p-2 rounded-lg text-center transition-all ${currentAgent === type
-                                ? `bg-gradient-to-r ${config.color} text-white shadow-md`
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                            }`}
-                    >
-                        <div className="text-lg">{config.icon}</div>
-                        <div className="text-xs font-medium mt-1">{config.name}</div>
+            <div className="flex items-center gap-2">
+                {isLoading ? (
+                    <div className="flex items-center gap-1.5 px-2">
+                        <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse"></div>
+                        <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse delay-75"></div>
+                        <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse delay-150"></div>
                     </div>
-                ))}
+                ) : (
+                    <div className={`w-2 h-2 rounded-full ${agent ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]' : 'bg-gray-300'}`}></div>
+                )}
             </div>
         </div>
     );

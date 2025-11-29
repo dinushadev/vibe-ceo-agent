@@ -20,18 +20,18 @@ export default function Home() {
 
   return (
     <div className={darkMode ? 'dark' : ''}>
-      <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
+      <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
         {/* Header */}
-        <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-10 shadow-sm">
-          <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="text-3xl">🤖</div>
+        <header className="glass sticky top-0 z-10 border-b border-border/40">
+          <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="text-3xl filter drop-shadow-sm">🤖</div>
               <div>
-                <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+                <h1 className="text-lg font-semibold tracking-tight">
                   Personal Vibe CEO
                 </h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Your AI-powered well-being companion
+                <p className="text-xs text-muted-foreground font-medium">
+                  Well-being Companion
                 </p>
               </div>
             </div>
@@ -39,7 +39,7 @@ export default function Home() {
             <div className="flex items-center gap-3">
               <button
                 onClick={() => setDarkMode(!darkMode)}
-                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                className="p-2 rounded-full hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
                 aria-label="Toggle dark mode"
               >
                 {darkMode ? '🌞' : '🌙'}
@@ -48,7 +48,7 @@ export default function Home() {
               {messages.length > 0 && (
                 <button
                   onClick={clearMessages}
-                  className="px-4 py-2 text-sm bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                  className="px-4 py-1.5 text-xs font-medium bg-secondary text-secondary-foreground rounded-full hover:bg-secondary/80 transition-colors"
                 >
                   Clear Chat
                 </button>
@@ -58,23 +58,20 @@ export default function Home() {
         </header>
 
         {/* Main Content */}
-        <main className="max-w-6xl mx-auto px-4 py-6 h-[calc(100vh-80px)] flex flex-col">
+        <main className="max-w-3xl mx-auto px-4 py-8 h-[calc(100vh-80px)] flex flex-col gap-6">
           {/* Agent Status */}
           <AgentStatus currentAgent={currentAgent} isLoading={isLoading} />
 
           {/* Chat Container */}
-          <div className="flex-1 bg-white dark:bg-gray-800 rounded-xl shadow-xl flex flex-col overflow-hidden border border-gray-200 dark:border-gray-700 mb-4">
+          <div className="flex-1 flex flex-col overflow-hidden relative">
             <ChatInterface messages={messages} isLoading={isLoading} />
           </div>
 
           {/* Message Input */}
-          <MessageInput onSendMessage={sendMessage} isLoading={isLoading} />
+          <div className="pb-4">
+            <MessageInput onSendMessage={sendMessage} isLoading={isLoading} />
+          </div>
         </main>
-
-        {/* Footer */}
-        <footer className="text-center py-4 text-sm text-gray-500 dark:text-gray-400">
-          <p>Personal Vibe CEO System • Capstone Project • Powered by Google ADK</p>
-        </footer>
 
         {/* Voice Interface */}
         <VoiceInterface />
