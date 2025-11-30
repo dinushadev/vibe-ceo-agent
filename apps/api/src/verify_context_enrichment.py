@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
 async def main():
     logger.info("Starting Context Enrichment Verification...")
     
+    # Use a test database to avoid locks
+    test_db_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data", "vibe_ceo_test_context.db"))
+    os.environ["DATABASE_PATH"] = test_db_path
+    
+    # Remove existing test db if it exists
+    if os.path.exists(test_db_path):
+        os.remove(test_db_path)
+    
     # 1. Setup Test Data
     db = Database()
     await db.connect()
@@ -30,7 +38,10 @@ async def main():
     # (In a real test we'd have a clean DB, but here we just overwrite)
     
     # Create User
-    await db.create_user(user_id, "Test User", ["AI", "Health"])
+    try:
+        await db.create_user(user_id, "Test User", ["AI", "Health"])
+    except Exception as e:
+        logger.info(f"User creation skipped (might exist): {e}")
     
     # Add Facts
     await db.save_user_fact("fact1", user_id, "personal", "nickname", "VibeTester")

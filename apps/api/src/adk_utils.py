@@ -4,7 +4,8 @@ Consolidates common patterns used across all agents
 """
 
 import logging
-from typing import AsyncIterator, Tuple, List
+from typing import AsyncIterator, Tuple, List, Dict, Optional
+from datetime import datetime
 from google.adk import Runner
 from google.adk.sessions import InMemorySessionService
 from src.adk_types import Content, Part
@@ -154,6 +155,11 @@ async def create_adk_runner(
         # Get or create session
         session_id = await get_or_create_session(user_id, app_name)
         
+        # Initialize tracer
+        tracer = get_agent_tracer()
+        tracer.clear() # Reset for new run
+        tracer.add_step("start", "Agent execution started", {"user_id": user_id, "prompt": prompt})
+        
         # Create runner with session service
         runner = Runner(
             agent=agent,
@@ -170,8 +176,78 @@ async def create_adk_runner(
         
         response_text, tools_used = await extract_text_from_adk_chunks(chunks)
         
+        # Finalize trace
+        tracer.add_step("complete", "Agent execution completed", {"response_length": len(response_text)})
+        tracer.end_trace()
+        
         return response_text, tools_used
         
     except Exception as e:
         logger.error(f"ADK runner execution failed: {e}", exc_info=True)
         raise
+    except Exception as e:
+        logger.error(f"ADK runner execution failed: {e}", exc_info=True)
+        raise
+
+
+class AgentTracer:
+    """
+    Tracks full agent execution lifecycle including:
+    - Overall latency
+    - Tool executions (inputs, outputs, duration)
+    - Agent steps/reasoning
+    """
+    
+    def __init__(self):
+        self._trace = {
+            "start_time": datetime.utcnow().isoformat(),
+            "steps": [],
+            "tools": [],
+            "metadata": {}
+        }
+        self._start_ts = datetime.now()
+        
+    def add_tool_execution(self, tool_name: str, input_data: dict, output_data: dict, duration_ms: int = 0):
+        """Record a tool execution"""
+        self._trace["tools"].append({
+            "tool": tool_name,
+            "input": input_data,
+            "output": output_data,
+            "duration_ms": duration_ms,
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        
+    def add_step(self, step_type: str, content: str, metadata: Optional[Dict] = None):
+        """Record an agent step (thought, response, etc)"""
+        self._trace["steps"].append({
+            "type": step_type,
+            "content": content,
+            "metadata": metadata or {},
+            "timestamp": datetime.utcnow().isoformat()
+        })
+        
+    def end_trace(self):
+        """Finalize the trace"""
+        self._trace["end_time"] = datetime.utcnow().isoformat()
+        self._trace["total_duration_ms"] = int((datetime.now() - self._start_ts).total_seconds() * 1000)
+        
+    def get_trace(self) -> Dict:
+        """Get the complete trace"""
+        return self._trace
+        
+    def clear(self):
+        self.__init__()
+
+# Global tracer instance
+# In production, use ContextVar for async safety
+_agent_tracer = AgentTracer()
+
+def get_agent_tracer():
+    return _agent_tracer
+
+# Backward compatibility
+def get_tool_tracker():
+    return _agent_tracer
+
+# Update ToolExecutionTracker to alias AgentTracer for backward compat if needed
+ToolExecutionTracker = AgentTracer

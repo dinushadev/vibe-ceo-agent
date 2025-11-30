@@ -73,6 +73,7 @@ export interface ChatRequest {
     context?: {
         agent_preference?: AgentType;
         session_id?: string;
+        timezone?: string;
     };
 }
 
@@ -113,6 +114,7 @@ export enum WebSocketMessageType {
     CONNECTION_ACK = 'connection_ack',
     PING = 'ping',
     PONG = 'pong',
+    CONFIG = 'config',
 }
 
 export interface WebSocketMessage {

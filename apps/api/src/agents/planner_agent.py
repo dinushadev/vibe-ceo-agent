@@ -6,6 +6,10 @@ ADK-powered agent for calendar management and task planning
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 
 from ..adk_config import create_agent
 from ..tools.adk_tools import PLANNER_TOOLS
@@ -35,8 +39,19 @@ Key behaviors:
 When scheduling:
 - Verify date, time, and duration
 - Check for conflicts using the check_availability tool
+- CRITICAL: You must CONFIRM the "Title", "Date", and "Time" with the user explicitly BEFORE calling `schedule_appointment`.
+- Example: "Just to confirm, you want to schedule [Title] on [Date] at [Time]?"
+- Ask for confirmation **EXACTLY ONE TIME**.
+- If the user agrees, **IMMEDIATELY** call `schedule_appointment`. DO NOT ask for confirmation again.
 - Create the appointment using schedule_appointment
 - Confirm with a clear summary
+
+CRITICAL - HANDLING VAGUE REQUESTS:
+- If the user asks to schedule something but is missing details (e.g., "Schedule a meeting with John" without time/date):
+  1. IMMEDIATELY create a high-priority task named "Schedule [Event Type] - Placeholder" using `create_task`.
+  2. THEN ask the user for the missing details (date, time, duration).
+  3. Tell the user: "I've created a placeholder task for that. When would you like to schedule it?"
+- NEVER just ask for details without creating the placeholder task first. This ensures we don't lose the intent.
 
 When managing tasks:
 - Clarify priority (high/medium/low)
@@ -102,7 +117,7 @@ class PlannerAgent(BaseAgent):
             memories = await self._get_memories(user_id)
             
             # Build context-enhanced prompt
-            enhanced_prompt = self._build_context_prompt(message, memories, user_id)
+            enhanced_prompt = await self._build_context_prompt(message, memories, user_id)
             
             # Use ADK agent to generate response and execute tools
             tools_used = []
@@ -137,7 +152,7 @@ class PlannerAgent(BaseAgent):
             logger.error(f"Error in Planner Agent process_message: {e}", exc_info=True)
             return self._build_error_response(e, "I'm having trouble with that request. Could you provide more details about what you'd like to schedule or plan?")
     
-    def _build_context_prompt(
+    async def _build_context_prompt(
         self,
         message: str,
         memories: List[Dict],
@@ -146,6 +161,17 @@ class PlannerAgent(BaseAgent):
     ) -> str:
         """Build enhanced prompt with context"""
         prompt_parts = [f"User message: {message}"]
+        
+        # Add current time in user's timezone
+        try:
+            pref = await self.db.get_user_preference(user_id, "general", "timezone")
+            tz_str = pref["pref_value"] if pref else "UTC"
+            user_tz = ZoneInfo(tz_str)
+            now_local = datetime.now(user_tz)
+            prompt_parts.append(f"Current User Time: {now_local.strftime('%Y-%m-%d %H:%M')} ({tz_str})")
+        except Exception as e:
+            logger.warning(f"Failed to get user timezone context: {e}")
+            prompt_parts.append(f"Current UTC Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}")
         
         # Add personal context (especially tasks and events)
         if personal_context:

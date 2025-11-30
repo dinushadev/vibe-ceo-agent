@@ -47,15 +47,50 @@ export default function ChatMessage({ message }: ChatMessageProps) {
 
                         {/* Metadata for agent messages */}
                         {!isUser && message.metadata && (
-                            <div className="mt-3 pt-2 border-t border-border/50">
-                                {message.metadata.tools_used && message.metadata.tools_used.length > 0 && (
-                                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground uppercase tracking-wider">
-                                        <span className="font-semibold">Tools:</span>
-                                        <span>{message.metadata.tools_used.join(', ')}</span>
+                            <div className="mt-3 pt-2 border-t border-border/50 space-y-2">
+                                {/* Tool Executions (Sub-agent messages) */}
+                                {message.metadata.tool_executions && message.metadata.tool_executions.length > 0 && (
+                                    <div className="space-y-2">
+                                        <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
+                                            Actions Taken:
+                                        </div>
+                                        {message.metadata.tool_executions.map((exec: any, index: number) => (
+                                            <div key={index} className="bg-secondary/50 rounded p-2 text-xs">
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span className="font-medium text-foreground">{exec.tool}</span>
+                                                    <span className="text-[10px] text-muted-foreground ml-auto">
+                                                        {new Date(exec.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                                    </span>
+                                                </div>
+                                                {/* Input Summary */}
+                                                <div className="text-muted-foreground mb-1">
+                                                    <span className="opacity-70">Input: </span>
+                                                    {JSON.stringify(exec.input).slice(0, 100)}{JSON.stringify(exec.input).length > 100 ? '...' : ''}
+                                                </div>
+                                                {/* Output Summary */}
+                                                <div className="text-foreground">
+                                                    <span className="opacity-70 text-muted-foreground">Result: </span>
+                                                    {/* Check if output is a simple string or object */}
+                                                    {typeof exec.output === 'string'
+                                                        ? exec.output
+                                                        : (exec.output.status === 'success' ? '✅ Success' : JSON.stringify(exec.output).slice(0, 100))}
+                                                </div>
+                                            </div>
+                                        ))}
                                     </div>
                                 )}
+
+                                {/* Legacy Tools Used (fallback) */}
+                                {(!message.metadata.tool_executions || message.metadata.tool_executions.length === 0) &&
+                                    message.metadata.tools_used && message.metadata.tools_used.length > 0 && (
+                                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground uppercase tracking-wider">
+                                            <span className="font-semibold">Tools:</span>
+                                            <span>{message.metadata.tools_used.join(', ')}</span>
+                                        </div>
+                                    )}
+
                                 {message.metadata.latency_ms && (
-                                    <div className="text-[10px] text-muted-foreground mt-1 font-mono opacity-70">
+                                    <div className="text-[10px] text-muted-foreground mt-1 font-mono opacity-70 text-right">
                                         {message.metadata.latency_ms}ms
                                     </div>
                                 )}

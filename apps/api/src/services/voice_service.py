@@ -18,10 +18,7 @@ from src.tools.memory_tools import (
     get_medical_profile,
     save_user_preference
 )
-from src.tools.productivity_tools import (
-    collect_todo_item,
-    book_calendar_event
-)
+# Productivity tools removed to enforce delegation to PlannerAgent
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +53,12 @@ class VoiceService:
         2. PLANNING: If the user needs to schedule, organize, or fix their day, use the 'consult_planner' tool.
         3. KNOWLEDGE: If the user wants to learn, research, or understand a topic, use the 'consult_knowledge' tool.
         4. PRODUCTIVITY (CRITICAL):
-           - Use 'collect_todo_item' to save tasks IMMEDIATELY when mentioned.
-           - Use 'book_calendar_event' to schedule meetings.
-           - IF MISSING INFO (e.g., time/date for meeting), ASK the user for it.
-           - Once you have the info, CALL THE TOOL IMMEDIATELY. Do not just say you will do it.
-           - Confirm to the user that it is "saved" or "booked" only AFTER calling the tool.
+           - ALWAYS DELEGATE ALL SCHEDULING AND TODO REQUESTS TO 'consult_planner'.
+           - DO NOT try to book events or create tasks directly using other tools.
+           - Even if the request is vague (e.g., "book a meeting"), call 'consult_planner' with the user's exact request.
+           - The Planner Agent will handle the details, placeholders, and CONFIRMATION.
+           - Trust the Planner Agent's response and relay it naturally.
+           - Do not double-check or ask the user again if the Planner Agent has already asked.
         
         AUDIO INSTRUCTIONS:
         - Speak naturally and conversationally.
@@ -71,6 +69,11 @@ class VoiceService:
         - You can REMEMBER facts, preferences, and medical info using tools.
         - If the user tells you something important (e.g., "I'm allergic to peanuts"), SAVE it.
         - Use `get_user_profile` to recall facts if needed.
+        
+        CRITICAL: ALWAYS CHECK THE "CURRENT CONTEXT" SECTION BELOW BEFORE SAYING YOU DON'T KNOW.
+        - If "PENDING TASKS" are listed, you HAVE pending tasks.
+        - If "UPCOMING EVENTS" are listed, you HAVE upcoming events.
+        - Do NOT say the calendar is clear if events are listed in the context.
         """
         
         # Define Tools
@@ -81,9 +84,7 @@ class VoiceService:
             get_user_profile,
             save_medical_info,
             get_medical_profile,
-            save_user_preference,
-            collect_todo_item,
-            book_calendar_event
+            save_user_preference
         ]
         
         # Attempt initial initialization
@@ -128,6 +129,7 @@ class VoiceService:
                 
                 # Get Personal Context (Facts, Prefs, Medical, Tasks, Events)
                 personal_context = await self.memory_service.get_user_context(user_id)
+                logger.info(f"Voice Service: Retrieved personal context (length: {len(personal_context)})")
                 
                 if short_term or long_term or personal_context:
                     memory_context = "\n\nCONTEXT:\n"
@@ -140,11 +142,23 @@ class VoiceService:
                     
                     if short_term:
                         memory_context += f"\n{short_term}"
+                    
+                    logger.info(f"Voice Service: Full memory context length: {len(memory_context)}")
             except Exception as e:
-                logger.error(f"Failed to fetch memory context for voice: {e}")
+                logger.error(f"Failed to fetch memory context for voice: {e}", exc_info=True)
 
         # 2. Update System Instruction
-        dynamic_system_instruction = self.system_instruction + memory_context
+        # Explicitly instruct the model to use the context
+        context_instruction = """
+        
+        CURRENT CONTEXT (Use this as the source of truth for tasks and events):
+        """
+        
+        dynamic_system_instruction = self.system_instruction + context_instruction + memory_context
+        
+        # Log the instruction to verify
+        logger.info(f"Voice Service: System instruction updated. Length: {len(dynamic_system_instruction)}")
+        logger.info(f"Voice Service: Instruction Tail (Context): {dynamic_system_instruction[-500:]}")
 
         config = {
             "response_modalities": ["AUDIO"],

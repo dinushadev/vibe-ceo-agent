@@ -16,10 +16,15 @@ class APIService {
         message: string,
         agentPreference?: AgentType
     ): Promise<ChatResponse> {
+        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
         const request: ChatRequest = {
             user_id: userId,
             message,
-            context: agentPreference ? { agent_preference: agentPreference } : {}
+            context: {
+                ...(agentPreference ? { agent_preference: agentPreference } : {}),
+                timezone
+            }
         };
 
         const response = await fetch(`${API_BASE_URL}/api/chat`, {

@@ -6,6 +6,10 @@ ADK-powered agent for personalized learning content curation
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 
 from ..adk_config import create_agent
 from ..tools.adk_tools import KNOWLEDGE_TOOLS
@@ -102,7 +106,13 @@ class KnowledgeAgent(BaseAgent):
             user_profile = await self._get_user_profile(user_id)
             
             # Build context-enhanced prompt
-            enhanced_prompt = self._build_context_prompt(message, memories, user_profile)
+            # Format user profile as personal context
+            personal_context = ""
+            if user_profile:
+                interests = user_profile.get("learning_interests", [])
+                personal_context = f"User Interests: {', '.join(interests)}"
+            
+            enhanced_prompt = await self._build_context_prompt(message, memories, user_id, personal_context)
             
             # Use ADK agent to generate response and execute tools
             tools_used = []
@@ -145,7 +155,7 @@ class KnowledgeAgent(BaseAgent):
         except Exception:
             return None
     
-    def _build_context_prompt(
+    async def _build_context_prompt(
         self,
         message: str,
         memories: List[Dict],
@@ -154,6 +164,17 @@ class KnowledgeAgent(BaseAgent):
     ) -> str:
         """Build enhanced prompt with context"""
         prompt_parts = [f"User message: {message}"]
+        
+        # Add current time in user's timezone
+        try:
+            pref = await self.db.get_user_preference(user_id, "general", "timezone")
+            tz_str = pref["pref_value"] if pref else "UTC"
+            user_tz = ZoneInfo(tz_str)
+            now_local = datetime.now(user_tz)
+            prompt_parts.append(f"Current User Time: {now_local.strftime('%Y-%m-%d %H:%M')} ({tz_str})")
+        except Exception as e:
+            logger.warning(f"Failed to get user timezone context: {e}")
+            prompt_parts.append(f"Current UTC Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}")
         
         # Add personal context (especially interests)
         if personal_context:

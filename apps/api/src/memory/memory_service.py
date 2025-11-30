@@ -163,10 +163,12 @@ class ADKMemoryService:
             Formatted context string with all personal data
         """
         context_parts = []
+        logger.info(f"Fetching user context for user_id: {user_id}")
         
         try:
             # 1. User Facts
             facts = await self.db.get_user_facts(user_id)
+            logger.info(f"Retrieved {len(facts)} user facts")
             if facts:
                 context_parts.append("USER FACTS:")
                 for fact in facts:
@@ -174,6 +176,7 @@ class ADKMemoryService:
             
             # 2. User Preferences
             preferences = await self.db.get_user_preferences(user_id)
+            logger.info(f"Retrieved {len(preferences)} user preferences")
             if preferences:
                 context_parts.append("\nUSER PREFERENCES:")
                 for pref in preferences:
@@ -181,16 +184,19 @@ class ADKMemoryService:
             
             # 3. Medical Profile
             medical_profile = await self.db.get_user_medical_profile(user_id)
+            logger.info(f"Retrieved {len(medical_profile)} medical conditions")
             if medical_profile:
                 context_parts.append("\nMEDICAL PROFILE:")
                 for condition in medical_profile:
-                    context_parts.append(f"  - {condition['condition_name']} ({condition['status']})")
+                    notes = f": {condition['notes']}" if condition.get('notes') else ""
+                    context_parts.append(f"  - {condition['condition_name']} ({condition['status']}){notes}")
                     if condition.get('medications'):
                         meds = ", ".join(condition['medications'])
                         context_parts.append(f"    Medications: {meds}")
             
             # 4. Pending Tasks
             tasks = await self.db.get_user_tasks(user_id, status="pending")
+            logger.info(f"Retrieved {len(tasks)} pending tasks")
             if tasks:
                 context_parts.append("\nPENDING TASKS:")
                 for task in tasks[:5]:  # Limit to 5 most recent
@@ -202,19 +208,19 @@ class ADKMemoryService:
             from datetime import datetime
             now = datetime.utcnow().isoformat()
             events = await self.db.get_user_events(user_id, start_after=now)
+            logger.info(f"Retrieved {len(events)} upcoming events")
             if events:
                 context_parts.append("\nUPCOMING EVENTS:")
                 for event in events[:5]:  # Limit to 5 upcoming
                     start = event['start_time'][:16].replace('T', ' ')  # Format: YYYY-MM-DD HH:MM
                     context_parts.append(f"  📅 {event['title']} - {start}")
             
-            if context_parts:
-                return "\n".join(context_parts)
-            else:
-                return ""
+            result = "\n".join(context_parts)
+            logger.info(f"Context generation complete. Length: {len(result)} chars")
+            return result
                 
         except Exception as e:
-            logger.error(f"Failed to get user context: {e}")
+            logger.error(f"Failed to get user context: {e}", exc_info=True)
             return ""
 
 

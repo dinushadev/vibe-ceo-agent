@@ -6,20 +6,23 @@
  */
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useChat } from '@/hooks/useChat';
+import { useTheme } from '@/context/ThemeContext';
 import AgentStatus from '@/components/AgentStatus';
 import ChatInterface from '@/components/ChatInterface';
 import MessageInput from '@/components/MessageInput';
 import { VoiceInterface } from '@/components/VoiceInterface';
+import ProfileMenu from '@/components/ProfileMenu';
 
 const USER_ID = 'demo-user-001'; // Demo user from seeded database
 
 export default function Home() {
   const { messages, isLoading, currentAgent, sendMessage, clearMessages } = useChat(USER_ID);
-  const [darkMode, setDarkMode] = useState(false);
+  const { theme, toggleTheme } = useTheme();
 
   return (
-    <div className={darkMode ? 'dark' : ''}>
+    <div className={theme === 'dark' ? 'dark' : ''}>
       <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
         {/* Header */}
         <header className="glass sticky top-0 z-10 border-b border-border/40">
@@ -37,13 +40,23 @@ export default function Home() {
             </div>
 
             <div className="flex items-center gap-3">
+              <Link
+                href="/settings"
+                className="p-2 rounded-full hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
+                aria-label="Settings"
+              >
+                ⚙️
+              </Link>
+
               <button
-                onClick={() => setDarkMode(!darkMode)}
+                onClick={toggleTheme}
                 className="p-2 rounded-full hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground"
                 aria-label="Toggle dark mode"
               >
-                {darkMode ? '🌞' : '🌙'}
+                {theme === 'dark' ? '🌞' : '🌙'}
               </button>
+
+              <ProfileMenu />
 
               {messages.length > 0 && (
                 <button

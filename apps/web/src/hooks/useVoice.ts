@@ -35,6 +35,13 @@ export function useVoice(): UseVoiceReturn {
         ws.onopen = () => {
             console.log('Voice WebSocket connected');
             setError(null);
+
+            // Send initial configuration with timezone
+            const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            ws.send(JSON.stringify({
+                type: 'config',
+                payload: { timezone }
+            }));
         };
 
         ws.onmessage = async (event) => {

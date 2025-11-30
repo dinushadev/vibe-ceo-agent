@@ -17,6 +17,11 @@ export const metadata: Metadata = {
   description: "Your personal AI assistant for emotional well-being, task planning, and learning",
 };
 
+import { ThemeProvider } from "@/context/ThemeContext";
+
+import { GoogleOAuthProvider } from "@react-oauth/google";
+import { AuthProvider } from "@/context/AuthContext";
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -27,7 +32,13 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        {children}
+        <GoogleOAuthProvider clientId={process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || ""}>
+          <AuthProvider>
+            <ThemeProvider>
+              {children}
+            </ThemeProvider>
+          </AuthProvider>
+        </GoogleOAuthProvider>
       </body>
     </html>
   );

@@ -146,6 +146,17 @@ async def chat(request: dict):
         
         logger.info(f"Chat request from user {user_id}: {message[:50]}...")
         
+        # Check for timezone in context and update if present
+        timezone = context.get("timezone")
+        if timezone:
+            await db.save_user_preference(
+                pref_id=f"timezone_{user_id}",
+                user_id=user_id,
+                category="general",
+                pref_key="timezone",
+                pref_value=timezone
+            )
+        
         # Route to orchestrator
         response = await orchestrator.process_message(user_id, message, context)
         
@@ -247,12 +258,23 @@ async def update_user_config(request: dict):
         # Update database
         name = request.get("name")
         learning_interests = request.get("learning_interests")
+        timezone = request.get("timezone")
         
         updated_user = await db.update_user(
             user_id=user_id,
             name=name,
             learning_interests=learning_interests
         )
+        
+        # Update timezone preference if provided
+        if timezone:
+            await db.save_user_preference(
+                pref_id=f"timezone_{user_id}",
+                user_id=user_id,
+                category="general",
+                pref_key="timezone",
+                pref_value=timezone
+            )
         
         return {
             "status": "success",
@@ -266,6 +288,120 @@ async def update_user_config(request: dict):
         logger.error(f"Error in update_user_config: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+        return {
+            "status": "success",
+            "message": "User config updated",
+            "user": updated_user
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in update_user_config: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Google Auth Endpoints
+# ============================================================================
+
+from src.services.google_auth_service import GoogleAuthService
+
+@app.get("/api/auth/google/url")
+async def get_google_auth_url():
+    """Get Google OAuth2 authorization URL"""
+    try:
+        auth_service = GoogleAuthService()
+        url = auth_service.get_authorization_url()
+        return {"url": url}
+    except Exception as e:
+        logger.error(f"Error generating auth URL: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/auth/login")
+async def login(request: dict):
+    """
+    Login with Google ID token
+    Request body: {"token": "google_id_token"}
+    """
+    try:
+        token = request.get("token")
+        if not token:
+            raise HTTPException(status_code=400, detail="Missing token")
+            
+        auth_service = GoogleAuthService()
+        user_info = await auth_service.verify_google_token(token)
+        
+        if not user_info:
+            raise HTTPException(status_code=401, detail="Invalid token")
+            
+        # Check if user exists
+        google_id = user_info["google_id"]
+        email = user_info["email"]
+        name = user_info["name"]
+        
+        existing_user = await db.get_user_by_google_id(google_id)
+        
+        if existing_user:
+            user = existing_user
+            # Update email/name if changed? For now just return user
+        else:
+            # Create new user
+            # Use google_id as user_id or generate a new UUID?
+            # For simplicity let's use google_id as user_id for now, or generate one.
+            # Generating a new one is safer for future multi-auth support.
+            import uuid
+            new_user_id = str(uuid.uuid4())
+            
+            user = await db.create_user(
+                user_id=new_user_id,
+                name=name,
+                email=email,
+                google_id=google_id
+            )
+            logger.info(f"Created new user {new_user_id} for Google ID {google_id}")
+            
+        return {
+            "status": "success",
+            "user": user,
+            "token": "session_token_placeholder" # In real app, issue JWT here
+        }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in login: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/auth/google/callback")
+async def google_auth_callback(request: dict):
+    """Handle Google OAuth2 callback"""
+    try:
+        code = request.get("code")
+        user_id = request.get("user_id", "user_123") # Default for MVP
+        
+        if not code:
+            raise HTTPException(status_code=400, detail="Missing auth code")
+            
+        auth_service = GoogleAuthService()
+        await auth_service.exchange_code_for_token(code, user_id)
+        
+        return {"status": "success", "message": "Google Calendar connected"}
+    except Exception as e:
+        logger.error(f"Error in auth callback: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/integrations/status")
+async def get_integrations_status(user_id: str = "user_123"):
+    """Get status of user integrations"""
+    try:
+        integration = await db.get_integration(user_id, "google_calendar")
+        return {
+            "google_calendar": bool(integration)
+        }
+    except Exception as e:
+        logger.error(f"Error checking integration status: {e}")
+        return {"google_calendar": False}
 
 # ============================================================================
 # WebSocket Endpoint for Voice Streaming
@@ -307,6 +443,24 @@ async def websocket_endpoint(websocket: WebSocket):
                         except Exception as e:
                             logger.error(f"Error decoding audio chunk: {e}")
                 
+                elif message_type == "config":
+                    # Handle configuration message (e.g. timezone)
+                    payload = data.get("payload", {})
+                    timezone = payload.get("timezone")
+                    if timezone:
+                        # We need user_id here. For now, assuming single user or session context
+                        # In a real app, user_id should be in the connection URL or auth token
+                        # Defaulting to "user_123" for MVP parity
+                        user_id = "user_123" 
+                        await db.save_user_preference(
+                            pref_id=f"timezone_{user_id}",
+                            user_id=user_id,
+                            category="general",
+                            pref_key="timezone",
+                            pref_value=timezone
+                        )
+                        logger.info(f"Updated timezone for {user_id} to {timezone}")
+
                 elif message_type == "ping":
                     await websocket.send_json({
                         "type": "pong",

@@ -61,16 +61,18 @@ class Database:
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
+            email TEXT,
+            google_id TEXT,
             learning_interests TEXT,  -- JSON array as string
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL
         );
         
         -- Health logs table
         CREATE TABLE IF NOT EXISTS health_logs (
             log_id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
+            timestamp TIMESTAMP NOT NULL,
             sleep_hours REAL NOT NULL,
             screen_time REAL NOT NULL,
             imbalance_score REAL NOT NULL,
@@ -86,7 +88,7 @@ class Database:
             data_source_id TEXT,
             summary_text TEXT NOT NULL,
             embedding_vector TEXT,  -- JSON array as string
-            timestamp TEXT NOT NULL,
+            timestamp TIMESTAMP NOT NULL,
             metadata TEXT,  -- JSON object as string
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         );
@@ -96,7 +98,7 @@ class Database:
             log_id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
             tool_name TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
+            timestamp TIMESTAMP NOT NULL,
             input_query TEXT NOT NULL,
             output_result TEXT NOT NULL,
             success INTEGER NOT NULL,  -- 0 or 1 (boolean)
@@ -114,6 +116,8 @@ class Database:
         CREATE INDEX IF NOT EXISTS idx_tool_logs_user_timestamp 
             ON tool_action_logs(user_id, timestamp);
 
+
+
         -- User Facts table
         CREATE TABLE IF NOT EXISTS user_facts (
             fact_id TEXT PRIMARY KEY,
@@ -121,8 +125,8 @@ class Database:
             category TEXT NOT NULL,
             fact_key TEXT NOT NULL,
             fact_value TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         );
 
@@ -134,8 +138,8 @@ class Database:
             status TEXT NOT NULL,
             notes TEXT,
             medications TEXT,  -- JSON array
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         );
 
@@ -146,8 +150,8 @@ class Database:
             category TEXT NOT NULL,
             pref_key TEXT NOT NULL,
             pref_value TEXT NOT NULL, -- JSON value
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         );
 
@@ -168,11 +172,11 @@ class Database:
             title TEXT NOT NULL,
             description TEXT,
             priority TEXT DEFAULT 'medium',
-            due_date TEXT,
+            due_date TIMESTAMP,
             status TEXT DEFAULT 'pending',
-            created_at TEXT NOT NULL,
-            completed_at TEXT,
-            updated_at TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL,
+            completed_at TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         );
 
@@ -182,12 +186,13 @@ class Database:
             user_id TEXT NOT NULL,
             title TEXT NOT NULL,
             description TEXT,
-            start_time TEXT NOT NULL,
-            end_time TEXT NOT NULL,
+            start_time TIMESTAMP NOT NULL,
+            end_time TIMESTAMP NOT NULL,
             location TEXT,
             status TEXT DEFAULT 'scheduled',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
+            google_event_id TEXT,
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(user_id)
         );
 
@@ -197,9 +202,34 @@ class Database:
             
         CREATE INDEX IF NOT EXISTS idx_calendar_events_user_time 
             ON calendar_events(user_id, start_time);
+
+        -- User Integrations table
+        CREATE TABLE IF NOT EXISTS user_integrations (
+            integration_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            service_name TEXT NOT NULL,
+            credentials_json TEXT NOT NULL,
+            created_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id),
+            UNIQUE(user_id, service_name)
+        );
         """
         
         await self.connection.executescript(schema)
+        
+        # Check if columns exist and add them if not (migration)
+        try:
+            await self.connection.execute("ALTER TABLE users ADD COLUMN email TEXT")
+        except Exception:
+            pass # Column likely exists
+            
+        try:
+            await self.connection.execute("ALTER TABLE users ADD COLUMN google_id TEXT")
+            await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)")
+        except Exception:
+            pass # Column likely exists
+            
         await self.connection.commit()
         logger.info("Database schema initialized")
     
@@ -211,6 +241,8 @@ class Database:
         self,
         user_id: str,
         name: str,
+        email: str = None,
+        google_id: str = None,
         learning_interests: List[str] = None
     ) -> Dict:
         """Create a new user"""
@@ -221,10 +253,10 @@ class Database:
         
         await self.connection.execute(
             """
-            INSERT INTO users (user_id, name, learning_interests, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO users (user_id, name, email, google_id, learning_interests, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, name, interests_json, now, now)
+            (user_id, name, email, google_id, interests_json, now, now)
         )
         await self.connection.commit()
         
@@ -243,6 +275,29 @@ class Database:
                 return {
                     "user_id": row["user_id"],
                     "name": row["name"],
+                    "email": row["email"] if "email" in row.keys() else None,
+                    "google_id": row["google_id"] if "google_id" in row.keys() else None,
+                    "learning_interests": json.loads(row["learning_interests"]),
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"]
+                }
+        return None
+
+    async def get_user_by_google_id(self, google_id: str) -> Optional[Dict]:
+        """Get user by Google ID"""
+        import json
+        
+        async with self.connection.execute(
+            "SELECT * FROM users WHERE google_id = ?",
+            (google_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return {
+                    "user_id": row["user_id"],
+                    "name": row["name"],
+                    "email": row["email"],
+                    "google_id": row["google_id"],
                     "learning_interests": json.loads(row["learning_interests"]),
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"]
@@ -757,7 +812,8 @@ class Database:
         start_time: str,
         end_time: str,
         description: str = None,
-        location: str = None
+        location: str = None,
+        google_event_id: str = None
     ) -> Dict:
         """Create a new calendar event"""
         now = datetime.utcnow().isoformat()
@@ -765,14 +821,28 @@ class Database:
         await self.connection.execute(
             """
             INSERT INTO calendar_events 
-            (event_id, user_id, title, description, start_time, end_time, location, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?)
+            (event_id, user_id, title, description, start_time, end_time, location, status, google_event_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?)
             """,
-            (event_id, user_id, title, description, start_time, end_time, location, now, now)
+            (event_id, user_id, title, description, start_time, end_time, location, google_event_id, now, now)
         )
         await self.connection.commit()
         
         return await self.get_event(event_id)
+
+    async def update_event_google_id(self, event_id: str, google_event_id: str) -> bool:
+        """Update the Google Event ID for a local event"""
+        now = datetime.utcnow().isoformat()
+        await self.connection.execute(
+            """
+            UPDATE calendar_events 
+            SET google_event_id = ?, updated_at = ?
+            WHERE event_id = ?
+            """,
+            (google_event_id, now, event_id)
+        )
+        await self.connection.commit()
+        return True
 
     async def get_event(self, event_id: str) -> Optional[Dict]:
         """Get event by ID"""
@@ -797,6 +867,64 @@ class Database:
         async with self.connection.execute(query, params) as cursor:
             rows = await cursor.fetchall()
             return [dict(row) for row in rows]
+
+    # ========================================================================
+    # User Integration operations
+    # ========================================================================
+
+    async def save_integration(
+        self,
+        user_id: str,
+        service_name: str,
+        credentials_json: str
+    ) -> Dict:
+        """Save or update a user integration"""
+        import uuid
+        now = datetime.utcnow().isoformat()
+        
+        # Check if exists
+        async with self.connection.execute(
+            "SELECT integration_id, created_at FROM user_integrations WHERE user_id = ? AND service_name = ?",
+            (user_id, service_name)
+        ) as cursor:
+            row = await cursor.fetchone()
+            
+        if row:
+            integration_id = row["integration_id"]
+            created_at = row["created_at"]
+            
+            await self.connection.execute(
+                """
+                UPDATE user_integrations 
+                SET credentials_json = ?, updated_at = ?
+                WHERE integration_id = ?
+                """,
+                (credentials_json, now, integration_id)
+            )
+        else:
+            integration_id = str(uuid.uuid4())
+            created_at = now
+            
+            await self.connection.execute(
+                """
+                INSERT INTO user_integrations 
+                (integration_id, user_id, service_name, credentials_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (integration_id, user_id, service_name, credentials_json, created_at, now)
+            )
+            
+        await self.connection.commit()
+        return await self.get_integration(user_id, service_name)
+
+    async def get_integration(self, user_id: str, service_name: str) -> Optional[Dict]:
+        """Get user integration credentials"""
+        async with self.connection.execute(
+            "SELECT * FROM user_integrations WHERE user_id = ? AND service_name = ?",
+            (user_id, service_name)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
 
     async def cancel_event(self, event_id: str) -> bool:
         """Cancel an event"""

@@ -6,6 +6,10 @@ ADK-powered agent for emotional and health well-being monitoring
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 
 from ..adk_config import create_agent
 from ..tools.adk_tools import VIBE_TOOLS
@@ -38,6 +42,11 @@ Memory Management:
 - When the user mentions a medical condition (e.g., "I have asthma"), SAVE it using `save_medical_info`.
 - When the user expresses a preference (e.g., "I hate early meetings"), SAVE it using `save_user_preference`.
 - USE this information to personalize your responses.
+
+CAPABILITIES:
+- You can check the user's calendar using `get_upcoming_appointments` or `check_availability`.
+- You can manage tasks using `create_task`, `get_pending_tasks`, and `complete_task`.
+- Always check "PENDING TASKS" and "UPCOMING EVENTS" in the context before saying you don't know.
 
 When analyzing health data:
 - Sleep < 7 hours is concerning
@@ -108,20 +117,16 @@ class VibeAgent(BaseAgent):
             # Get recent health data
             health_logs = await self.db.get_user_health_logs(user_id, limit=3)
             
-            # Get persistent user profile (Facts & Medical)
-            user_facts = await self.db.get_user_facts(user_id)
-            medical_profile = await self.db.get_user_medical_profile(user_id)
-            user_prefs = await self.db.get_user_preferences(user_id)
+            # Get comprehensive personal context
+            personal_context = await self._get_personal_context(user_id)
             
             # Build context-enhanced prompt
-            enhanced_prompt = self._build_context_prompt(
-                message, 
-                memories, 
-                health_logs, 
-                short_term_context,
-                user_facts,
-                medical_profile,
-                user_prefs
+            enhanced_prompt = await self._build_context_prompt(
+                message=message, 
+                memories=memories, 
+                user_id=user_id,
+                health_data=health_logs[0] if health_logs else None,
+                personal_context=personal_context
             )
             
             # Use ADK agent to generate response
@@ -142,12 +147,17 @@ class VibeAgent(BaseAgent):
             # Calculate latency
             latency = int((datetime.now() - start_time).total_seconds() * 1000)
             
+            # Get execution trace
+            from ..adk_utils import get_agent_tracer
+            trace = get_agent_tracer().get_trace()
+            
             return self._build_response_dict(
                 response_text,
                 {
                     "memory_retrieved": [m.get("summary_text", "")[:50] for m in memories[:2]],
                     "tools_used": tools_used,
                     "health_assessment": self._assess_health(health_logs) if health_logs else None,
+                    "trace": trace
                 },
                 latency
             )
@@ -209,7 +219,7 @@ class VibeAgent(BaseAgent):
             logger.error(f"Error in proactive outreach check: {e}", exc_info=True)
             return None
     
-    def _build_context_prompt(
+    async def _build_context_prompt(
         self,
         message: str,
         memories: List[Dict],
@@ -219,6 +229,17 @@ class VibeAgent(BaseAgent):
     ) -> str:
         """Build enhanced prompt with health context and memories"""
         prompt_parts = [f"User message: {message}"]
+        
+        # Add current time in user's timezone
+        try:
+            pref = await self.db.get_user_preference(user_id, "general", "timezone")
+            tz_str = pref["pref_value"] if pref else "UTC"
+            user_tz = ZoneInfo(tz_str)
+            now_local = datetime.now(user_tz)
+            prompt_parts.append(f"Current User Time: {now_local.strftime('%Y-%m-%d %H:%M')} ({tz_str})")
+        except Exception as e:
+            logger.warning(f"Failed to get user timezone context: {e}")
+            prompt_parts.append(f"Current UTC Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}")
         
         # Add personal context (facts, preferences, medical, tasks, events)
         if personal_context:
