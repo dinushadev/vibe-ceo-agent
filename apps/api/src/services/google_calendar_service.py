@@ -67,3 +67,45 @@ class GoogleCalendarService:
         except Exception as e:
             logger.error(f"Failed to create Google Calendar event: {e}")
             return {"status": "error", "message": str(e)}
+
+    async def update_event(self, google_event_id: str, event_data: dict):
+        """Update an event in Google Calendar"""
+        if not self.service:
+            success = await self.authenticate()
+            if not success:
+                return {"status": "error", "message": "Not authenticated with Google Calendar"}
+
+        try:
+            # First get the existing event to preserve other fields
+            event = self.service.events().get(calendarId='primary', eventId=google_event_id).execute()
+            
+            # Update fields
+            if 'title' in event_data:
+                event['summary'] = event_data['title']
+            if 'description' in event_data:
+                event['description'] = event_data['description']
+            if 'location' in event_data:
+                event['location'] = event_data['location']
+            if 'start_time' in event_data:
+                event['start'] = {
+                    'dateTime': event_data['start_time'],
+                    'timeZone': 'UTC',
+                }
+            if 'end_time' in event_data:
+                event['end'] = {
+                    'dateTime': event_data['end_time'],
+                    'timeZone': 'UTC',
+                }
+
+            updated_event = self.service.events().update(
+                calendarId='primary', 
+                eventId=google_event_id, 
+                body=event
+            ).execute()
+            
+            logger.info(f"Updated Google Calendar event: {updated_event.get('htmlLink')}")
+            return {"status": "success", "link": updated_event.get('htmlLink')}
+            
+        except Exception as e:
+            logger.error(f"Failed to update Google Calendar event: {e}")
+            return {"status": "error", "message": str(e)}

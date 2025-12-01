@@ -15,11 +15,15 @@ import MessageInput from '@/components/MessageInput';
 import { VoiceInterface } from '@/components/VoiceInterface';
 import ProfileMenu from '@/components/ProfileMenu';
 
-const USER_ID = 'demo-user-001'; // Demo user from seeded database
+import { useAuth } from '@/context/AuthContext';
 
 export default function Home() {
-  const { messages, isLoading, currentAgent, sendMessage, clearMessages } = useChat(USER_ID);
+  const { user, isLoading: isAuthLoading } = useAuth();
+  const { messages, isLoading: isChatLoading, currentAgent, sendMessage, clearMessages } = useChat(user?.user_id || '');
   const { theme, toggleTheme } = useTheme();
+
+  // Combine loading states
+  const isLoading = isAuthLoading || isChatLoading;
 
   return (
     <div className={theme === 'dark' ? 'dark' : ''}>

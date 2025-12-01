@@ -45,6 +45,12 @@ class Database:
         
         self.connection = await aiosqlite.connect(self.db_path)
         self.connection.row_factory = aiosqlite.Row
+        
+        # Enable WAL mode for better concurrency
+        await self.connection.execute("PRAGMA journal_mode=WAL;")
+        # Set busy timeout to wait for locks to clear
+        await self.connection.execute("PRAGMA busy_timeout=5000;")
+        
         await self.initialize_schema()
         logger.info("Database connected and schema initialized")
     
@@ -227,6 +233,11 @@ class Database:
         try:
             await self.connection.execute("ALTER TABLE users ADD COLUMN google_id TEXT")
             await self.connection.execute("CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)")
+        except Exception:
+            pass # Column likely exists
+            
+        try:
+            await self.connection.execute("ALTER TABLE calendar_events ADD COLUMN google_event_id TEXT")
         except Exception:
             pass # Column likely exists
             
@@ -825,6 +836,50 @@ class Database:
             VALUES (?, ?, ?, ?, ?, ?, ?, 'scheduled', ?, ?, ?)
             """,
             (event_id, user_id, title, description, start_time, end_time, location, google_event_id, now, now)
+        )
+        await self.connection.commit()
+        
+        return await self.get_event(event_id)
+
+    async def update_event(
+        self,
+        event_id: str,
+        title: str = None,
+        description: str = None,
+        start_time: str = None,
+        end_time: str = None,
+        location: str = None
+    ) -> Optional[Dict]:
+        """Update a calendar event"""
+        now = datetime.utcnow().isoformat()
+        
+        updates = []
+        params = []
+        
+        if title:
+            updates.append("title = ?")
+            params.append(title)
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description)
+        if start_time:
+            updates.append("start_time = ?")
+            params.append(start_time)
+        if end_time:
+            updates.append("end_time = ?")
+            params.append(end_time)
+        if location is not None:
+            updates.append("location = ?")
+            params.append(location)
+            
+        updates.append("updated_at = ?")
+        params.append(now)
+        
+        params.append(event_id)
+        
+        await self.connection.execute(
+            f"UPDATE calendar_events SET {', '.join(updates)} WHERE event_id = ?",
+            params
         )
         await self.connection.commit()
         

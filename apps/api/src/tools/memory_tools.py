@@ -8,6 +8,7 @@ import uuid
 from typing import Dict, List, Optional
 
 from ..db.database import get_database
+from src.context import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,6 @@ logger = logging.getLogger(__name__)
 # ============================================================================
 
 async def save_user_fact(
-    user_id: str,
     category: str,
     fact_key: str,
     fact_value: str
@@ -26,13 +26,13 @@ async def save_user_fact(
     Use this to remember important details like family members, job, birthday, etc.
     
     Args:
-        user_id: The ID of the user.
         category: Category of the fact (e.g., "personal", "work", "family", "interests").
         fact_key: Specific key for the fact (e.g., "spouse_name", "job_title").
         fact_value: The value of the fact.
     """
     try:
         db = await get_database()
+        user_id = get_current_user_id()
         # Generate a deterministic ID based on user, category, key to ensure uniqueness/updates
         fact_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{user_id}:{category}:{fact_key}"))
         
@@ -48,16 +48,16 @@ async def save_user_fact(
         logger.error(f"Error saving user fact: {e}")
         return {"status": "error", "message": str(e)}
 
-async def get_user_profile(user_id: str, categories: Optional[List[str]] = None) -> Dict:
+async def get_user_profile(categories: Optional[List[str]] = None) -> Dict:
     """
     Retrieve the user's persistent profile (facts and preferences).
     
     Args:
-        user_id: The ID of the user.
         categories: Optional list of categories to filter by.
     """
     try:
         db = await get_database()
+        user_id = get_current_user_id()
         
         facts = []
         if categories:
@@ -79,7 +79,6 @@ async def get_user_profile(user_id: str, categories: Optional[List[str]] = None)
         return {"status": "error", "message": str(e)}
 
 async def save_medical_info(
-    user_id: str,
     condition_name: str,
     status: str,
     notes: Optional[str] = None,
@@ -89,7 +88,6 @@ async def save_medical_info(
     Save medical information to the user's profile.
     
     Args:
-        user_id: The ID of the user.
         condition_name: Name of the medical condition.
         status: Status of the condition (e.g., "active", "managed", "history").
         notes: Additional notes.
@@ -97,6 +95,7 @@ async def save_medical_info(
     """
     try:
         db = await get_database()
+        user_id = get_current_user_id()
         # Generate deterministic ID
         condition_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{user_id}:medical:{condition_name}"))
         
@@ -113,15 +112,13 @@ async def save_medical_info(
         logger.error(f"Error saving medical info: {e}")
         return {"status": "error", "message": str(e)}
 
-async def get_medical_profile(user_id: str) -> Dict:
+async def get_medical_profile() -> Dict:
     """
     Retrieve the user's medical profile.
-    
-    Args:
-        user_id: The ID of the user.
     """
     try:
         db = await get_database()
+        user_id = get_current_user_id()
         conditions = await db.get_user_medical_profile(user_id)
         return {"status": "success", "conditions": conditions}
     except Exception as e:
@@ -129,7 +126,6 @@ async def get_medical_profile(user_id: str) -> Dict:
         return {"status": "error", "message": str(e)}
 
 async def save_user_preference(
-    user_id: str,
     category: str,
     pref_key: str,
     pref_value: str
@@ -138,13 +134,13 @@ async def save_user_preference(
     Save a user preference.
     
     Args:
-        user_id: The ID of the user.
         category: Category (e.g., "communication", "ui", "notifications").
         pref_key: Specific preference key.
         pref_value: Preference value.
     """
     try:
         db = await get_database()
+        user_id = get_current_user_id()
         # Generate deterministic ID
         pref_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{user_id}:pref:{category}:{pref_key}"))
         

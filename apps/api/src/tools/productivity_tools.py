@@ -12,6 +12,7 @@ except ImportError:
     from backports.zoneinfo import ZoneInfo # Fallback for older python
 from typing import Dict, Optional, List
 from src.db.database import get_database
+from src.context import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +44,7 @@ async def collect_todo_item(
     """
     try:
         db = await get_database()
-        user_id = "user_123" # Default for MVP
+        user_id = get_current_user_id()
         task_id = str(uuid.uuid4())
         
         task = await db.create_task(
@@ -78,7 +79,7 @@ async def book_calendar_event(
     """
     try:
         db = await get_database()
-        user_id = "user_123" # Default for MVP
+        user_id = get_current_user_id()
         event_id = str(uuid.uuid4())
         
         # Get user timezone
@@ -133,6 +134,109 @@ async def book_calendar_event(
         logger.error(f"Error booking calendar event: {e}")
         return {"status": "error", "message": str(e)}
 
+async def update_calendar_event(
+    event_id: str,
+    title: Optional[str] = None,
+    start_time: Optional[str] = None,
+    description: Optional[str] = None,
+    duration_minutes: Optional[int] = None,
+    location: Optional[str] = None
+) -> Dict:
+    """
+    Update an existing calendar event.
+    
+    Args:
+        event_id: The ID of the event to update.
+        title: New title.
+        start_time: New start time.
+        description: New description.
+        duration_minutes: New duration in minutes (requires start_time).
+        location: New location.
+    """
+    try:
+        db = await get_database()
+        user_id = get_current_user_id()
+        
+        # Get existing event
+        existing_event = await db.get_event(event_id)
+        if not existing_event:
+            return {"status": "error", "message": "Event not found"}
+            
+        if existing_event["user_id"] != user_id:
+             return {"status": "error", "message": "Unauthorized"}
+        
+        # Prepare updates
+        updates = {}
+        if title:
+            updates["title"] = title
+        if description is not None:
+            updates["description"] = description
+        if location is not None:
+            updates["location"] = location
+            
+        start_utc = None
+        end_utc = None
+        
+        if start_time:
+            # Get user timezone
+            user_tz_str = await _get_user_timezone(user_id)
+            
+            # Parse start time
+            parsed_start_time = _parse_time(start_time, user_tz_str)
+            
+            # Calculate end time
+            if duration_minutes:
+                end_time = parsed_start_time + timedelta(minutes=duration_minutes)
+            else:
+                # Keep existing duration
+                old_start = datetime.fromisoformat(existing_event["start_time"])
+                old_end = datetime.fromisoformat(existing_event["end_time"])
+                duration = old_end - old_start
+                end_time = parsed_start_time + duration
+            
+            start_utc = parsed_start_time.astimezone(ZoneInfo("UTC"))
+            end_utc = end_time.astimezone(ZoneInfo("UTC"))
+            
+            updates["start_time"] = start_utc.isoformat()
+            updates["end_time"] = end_utc.isoformat()
+        
+        elif duration_minutes:
+             # Update end time only based on existing start
+             old_start = datetime.fromisoformat(existing_event["start_time"])
+             if old_start.tzinfo is None:
+                 old_start = old_start.replace(tzinfo=ZoneInfo("UTC"))
+                 
+             end_time = old_start + timedelta(minutes=duration_minutes)
+             end_utc = end_time.astimezone(ZoneInfo("UTC"))
+             updates["end_time"] = end_utc.isoformat()
+
+        # Update local DB
+        updated_event = await db.update_event(event_id, **updates)
+        
+        # Sync to Google Calendar
+        if existing_event.get("google_event_id"):
+            try:
+                from src.services.google_calendar_service import GoogleCalendarService
+                gcal_service = GoogleCalendarService(user_id)
+                
+                gcal_updates = updates.copy()
+                # Ensure we send what Google expects if we updated times
+                
+                gcal_result = await gcal_service.update_event(existing_event["google_event_id"], gcal_updates)
+                
+                if gcal_result.get("status") == "success":
+                    logger.info(f"Synced update to Google Calendar: {gcal_result.get('link')}")
+                else:
+                    logger.warning(f"Failed to sync update to Google Calendar: {gcal_result.get('message')}")
+                    
+            except Exception as e:
+                logger.error(f"Error syncing update to Google Calendar: {e}")
+        
+        return {"status": "success", "event": updated_event}
+    except Exception as e:
+        logger.error(f"Error updating calendar event: {e}")
+        return {"status": "error", "message": str(e)}
+
 async def get_upcoming_events(days_ahead: int = 7) -> Dict:
     """
     Get upcoming calendar events.
@@ -142,7 +246,7 @@ async def get_upcoming_events(days_ahead: int = 7) -> Dict:
     """
     try:
         db = await get_database()
-        user_id = "user_123"
+        user_id = get_current_user_id()
         
         # Get user timezone
         user_tz_str = await _get_user_timezone(user_id)
@@ -191,7 +295,7 @@ async def check_availability(date: str, start_time: str, end_time: str) -> Dict:
     """
     try:
         db = await get_database()
-        user_id = "user_123"
+        user_id = get_current_user_id()
         
         # Get user timezone
         user_tz_str = await _get_user_timezone(user_id)
@@ -253,7 +357,7 @@ async def get_pending_tasks(priority: Optional[str] = None) -> Dict:
     """
     try:
         db = await get_database()
-        user_id = "user_123"
+        user_id = get_current_user_id()
         
         tasks = await db.get_user_tasks(user_id, status="pending")
         

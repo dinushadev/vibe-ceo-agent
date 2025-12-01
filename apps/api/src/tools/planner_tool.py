@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional
 
 from src.db.database import get_database
 from src.agents.planner_agent import PlannerAgent
+from src.context import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +37,8 @@ async def consult_planner_wrapper(user_request: str) -> str:
     
     try:
         agent = await get_planner_agent()
-        # Use a fixed user_id for now, consistent with other parts of the system
-        user_id = "user_123"
+        # Use dynamic user_id from context
+        user_id = get_current_user_id()
         
         response = await agent.process_message(user_id, user_request)
         

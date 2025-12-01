@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 from src.db.database import get_database
 from src.services.google_calendar_service import GoogleCalendarService
 
@@ -12,7 +13,7 @@ async def verify_and_sync_events():
     Verify all local events are synced to Google Calendar.
     If not, sync them and update the local DB.
     """
-    user_id = "user_123" # Default user
+    user_id = os.getenv("TEST_USER_ID", "user_123") # Default user for local testing
     
     logger.info("Starting Google Calendar Sync Verification...")
     

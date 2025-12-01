@@ -2,22 +2,31 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useAuth } from '@/context/AuthContext';
 
 export default function AuthCallback() {
     const router = useRouter();
     const searchParams = useSearchParams();
+    const { user, isLoading } = useAuth();
     const [status, setStatus] = useState('Processing authentication...');
 
     useEffect(() => {
+        if (isLoading) return;
+
+        if (!user) {
+            setStatus('User not authenticated. Please log in.');
+            return;
+        }
+
         const code = searchParams.get('code');
         if (code) {
-            handleCallback(code);
+            handleCallback(code, user.user_id);
         } else {
             setStatus('No authentication code found.');
         }
-    }, [searchParams]);
+    }, [searchParams, user, isLoading]);
 
-    const handleCallback = async (code: string) => {
+    const handleCallback = async (code: string, userId: string) => {
         try {
             const response = await fetch('http://localhost:8000/api/auth/google/callback', {
                 method: 'POST',
@@ -26,7 +35,7 @@ export default function AuthCallback() {
                 },
                 body: JSON.stringify({
                     code,
-                    user_id: 'user_123' // Default for MVP
+                    user_id: userId
                 }),
             });
 

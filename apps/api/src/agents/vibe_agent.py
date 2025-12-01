@@ -15,45 +15,12 @@ from ..adk_config import create_agent
 from ..tools.adk_tools import VIBE_TOOLS
 from .base_agent import BaseAgent
 from ..adk_utils import create_adk_runner
+from .prompts import VIBE_AGENT_INSTRUCTION
 
 logger = logging.getLogger(__name__)
 
 
-# Agent instruction prompt
-VIBE_AGENT_INSTRUCTION = """You are the Vibe Agent, a compassionate and empathetic AI companion focused on emotional well-being and work-life balance.
 
-Your role is to:
-1. Monitor the user's health data (sleep patterns, screen time) and identify imbalances
-2. Provide empathetic support and guidance for stress management
-3. Recall previous conversations and context to provide personalized support
-4. Proactively check in when you detect concerning patterns
-5. Maintain a persistent understanding of the user by saving important facts, preferences, and medical info
-6. Use warm, supportive language that makes the user feel heard and understood
-
-Key behaviors:
-- Always acknowledge the user's feelings first
-- Reference past conversations and KNOWN FACTS (e.g., family, job) to show continuity
-- Suggest concrete, actionable steps for improvement
-- Be encouraging but realistic
-- Focus on balance and sustainable habits
-
-Memory Management:
-- When the user mentions a new fact (e.g., "My daughter's name is Lily"), SAVE it using `save_user_fact`.
-- When the user mentions a medical condition (e.g., "I have asthma"), SAVE it using `save_medical_info`.
-- When the user expresses a preference (e.g., "I hate early meetings"), SAVE it using `save_user_preference`.
-- USE this information to personalize your responses.
-
-CAPABILITIES:
-- You can check the user's calendar using `get_upcoming_appointments` or `check_availability`.
-- You can manage tasks using `create_task`, `get_pending_tasks`, and `complete_task`.
-- Always check "PENDING TASKS" and "UPCOMING EVENTS" in the context before saying you don't know.
-
-When analyzing health data:
-- Sleep < 7 hours is concerning
-- Screen time > 8 hours may indicate imbalance
-- High imbalance scores (>10) require gentle proactive outreach
-
-Always respond with empathy and encouragement."""
 
 
 class VibeAgent(BaseAgent):
@@ -219,47 +186,7 @@ class VibeAgent(BaseAgent):
             logger.error(f"Error in proactive outreach check: {e}", exc_info=True)
             return None
     
-    async def _build_context_prompt(
-        self,
-        message: str,
-        memories: List[Dict],
-        user_id: str,
-        health_data: Optional[Dict] = None,
-        personal_context: str = ""
-    ) -> str:
-        """Build enhanced prompt with health context and memories"""
-        prompt_parts = [f"User message: {message}"]
-        
-        # Add current time in user's timezone
-        try:
-            pref = await self.db.get_user_preference(user_id, "general", "timezone")
-            tz_str = pref["pref_value"] if pref else "UTC"
-            user_tz = ZoneInfo(tz_str)
-            now_local = datetime.now(user_tz)
-            prompt_parts.append(f"Current User Time: {now_local.strftime('%Y-%m-%d %H:%M')} ({tz_str})")
-        except Exception as e:
-            logger.warning(f"Failed to get user timezone context: {e}")
-            prompt_parts.append(f"Current UTC Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}")
-        
-        # Add personal context (facts, preferences, medical, tasks, events)
-        if personal_context:
-            prompt_parts.append(f"\n{personal_context}")
-        
-        # Add health data if available
-        if health_data:
-            prompt_parts.append(f"\nRecent health metrics:")
-            prompt_parts.append(f"- Sleep: {health_data.get('sleep_hours', 'N/A')} hours")
-            prompt_parts.append(f"- Screen time: {health_data.get('screen_time', 'N/A')} hours")
-            prompt_parts.append(f"- Balance score: {health_data.get('imbalance_score', 'N/A')}/10")
-        
-        # Add memory context
-        if memories:
-            memory_text = "\n".join([f"- {m.get('summary_text', '')}" for m in memories[:3]])
-            prompt_parts.append(f"\nPrevious interactions:\n{memory_text}")
-        
-        prompt_parts.append(f"\nUser ID: {user_id}")
-        
-        return "\n".join(prompt_parts)
+
     
     async def _generate_fallback_response(
         self,

@@ -1,9 +1,11 @@
 'use client';
 
 import React from 'react';
+import { useAuth } from '@/context/AuthContext';
 import { useVoice } from '../hooks/useVoice';
 
 export function VoiceInterface() {
+    const { user } = useAuth();
     const {
         isListening,
         isProcessing,
@@ -12,7 +14,7 @@ export function VoiceInterface() {
         startRecording,
         stopRecording,
         error
-    } = useVoice();
+    } = useVoice(user?.user_id);
 
     return (
         <div className="fixed bottom-8 right-8 z-50 flex flex-col items-end gap-4">

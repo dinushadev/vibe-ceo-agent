@@ -14,41 +14,12 @@ except ImportError:
 from ..adk_config import create_agent
 from ..tools.adk_tools import KNOWLEDGE_TOOLS
 from .base_agent import BaseAgent
+from .prompts import KNOWLEDGE_AGENT_INSTRUCTION
 
 logger = logging.getLogger(__name__)
 
 
-# Agent instruction prompt
-KNOWLEDGE_AGENT_INSTRUCTION = """You are the Knowledge Agent, a personalized learning curator designed to help users digest complex topics efficiently.
 
-Your role is to:
-1. Research topics requested by the user using available search tools
-2. Curate "Learning Digests" - concise, structured summaries of key information
-3. Adapt content to the user's learning style and interests
-4. Break down complex concepts into understandable chunks
-5. Provide credible sources and further reading suggestions
-
-Key behaviors:
-- When asked about a topic, use the search_learning_content tool first
-- Structure your response as a "Learning Digest" with clear headings
-- Focus on quality over quantity - synthesize the best information
-- Connect new concepts to the user's known interests
-- Be objective and factual
-
-When creating learning digests:
-- Start with a brief overview
-- Break down complex topics into digestible chunks
-- Include practical examples or applications
-- Summarize key points
-- Suggest next steps or related topics
-
-When searching:
-- Use the search_learning_content tool to find relevant articles
-- Evaluate quality and relevance
-- Synthesize multiple sources
-- Cite sources when possible
-
-Always be informative, clear, and encourage continuous learning."""
 
 
 class KnowledgeAgent(BaseAgent):
@@ -112,7 +83,12 @@ class KnowledgeAgent(BaseAgent):
                 interests = user_profile.get("learning_interests", [])
                 personal_context = f"User Interests: {', '.join(interests)}"
             
-            enhanced_prompt = await self._build_context_prompt(message, memories, user_id, personal_context)
+            enhanced_prompt = await self._build_context_prompt(
+                message=message,
+                memories=memories,
+                user_id=user_id,
+                personal_context=personal_context
+            )
             
             # Use ADK agent to generate response and execute tools
             tools_used = []
@@ -155,40 +131,7 @@ class KnowledgeAgent(BaseAgent):
         except Exception:
             return None
     
-    async def _build_context_prompt(
-        self,
-        message: str,
-        memories: List[Dict],
-        user_id: str,
-        personal_context: str = ""
-    ) -> str:
-        """Build enhanced prompt with context"""
-        prompt_parts = [f"User message: {message}"]
-        
-        # Add current time in user's timezone
-        try:
-            pref = await self.db.get_user_preference(user_id, "general", "timezone")
-            tz_str = pref["pref_value"] if pref else "UTC"
-            user_tz = ZoneInfo(tz_str)
-            now_local = datetime.now(user_tz)
-            prompt_parts.append(f"Current User Time: {now_local.strftime('%Y-%m-%d %H:%M')} ({tz_str})")
-        except Exception as e:
-            logger.warning(f"Failed to get user timezone context: {e}")
-            prompt_parts.append(f"Current UTC Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}")
-        
-        # Add personal context (especially interests)
-        if personal_context:
-            prompt_parts.append(f"\n{personal_context}")
-        
-        # Add memory context
-        if memories:
-            memory_text = "\n".join([f"- {m.get('summary_text', '')}" for m in memories[:3]])
-            prompt_parts.append(f"\nPrevious research context:\n{memory_text}")
-        
-        prompt_parts.append(f"\nUser ID: {user_id}")
-        prompt_parts.append("Tailor the content to align with these interests where possible.")
-        
-        return "\n".join(prompt_parts)
+
     
     async def _generate_fallback_response(
         self,

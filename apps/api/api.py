@@ -143,6 +143,10 @@ async def chat(request: dict):
         
         if not user_id or not message:
             raise HTTPException(status_code=400, detail="Missing required fields: user_id and message")
+            
+        # Set context for tools
+        from src.context import set_current_user_id
+        set_current_user_id(user_id)
         
         logger.info(f"Chat request from user {user_id}: {message[:50]}...")
         
@@ -378,7 +382,9 @@ async def google_auth_callback(request: dict):
     """Handle Google OAuth2 callback"""
     try:
         code = request.get("code")
-        user_id = request.get("user_id", "user_123") # Default for MVP
+        user_id = request.get("user_id")
+        if not user_id:
+             raise HTTPException(status_code=400, detail="Missing user_id")
         
         if not code:
             raise HTTPException(status_code=400, detail="Missing auth code")
@@ -392,7 +398,7 @@ async def google_auth_callback(request: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/integrations/status")
-async def get_integrations_status(user_id: str = "user_123"):
+async def get_integrations_status(user_id: str):
     """Get status of user integrations"""
     try:
         integration = await db.get_integration(user_id, "google_calendar")
@@ -448,10 +454,17 @@ async def websocket_endpoint(websocket: WebSocket):
                     payload = data.get("payload", {})
                     timezone = payload.get("timezone")
                     if timezone:
-                        # We need user_id here. For now, assuming single user or session context
-                        # In a real app, user_id should be in the connection URL or auth token
-                        # Defaulting to "user_123" for MVP parity
-                        user_id = "user_123" 
+                        # Extract user_id from payload, sent by frontend
+                        user_id = payload.get("user_id")
+                        
+                        if not user_id:
+                            logger.warning("No user_id provided in config, defaulting to 'user_123' for backward compatibility")
+                            user_id = "user_123"
+
+                        # Set context for tools
+                        from src.context import set_current_user_id
+                        set_current_user_id(user_id)
+                        
                         await db.save_user_preference(
                             pref_id=f"timezone_{user_id}",
                             user_id=user_id,

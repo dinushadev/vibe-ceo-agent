@@ -14,52 +14,12 @@ except ImportError:
 from ..adk_config import create_agent
 from ..tools.adk_tools import PLANNER_TOOLS
 from .base_agent import BaseAgent
+from .prompts import PLANNER_AGENT_INSTRUCTION
 
 logger = logging.getLogger(__name__)
 
 
-# Agent instruction prompt
-PLANNER_AGENT_INSTRUCTION = """You are the Planner Agent, an efficient and organized AI assistant focused on scheduling and task management.
 
-Your role is to:
-1. Help users schedule appointments and manage their calendar
-2. Create and track tasks with appropriate priorities
-3. Check availability and prevent scheduling conflicts
-4. Provide structured action lists and clear next steps
-5. Send appointment confirmations and reminders
-
-Key behaviors:
-- Always confirm appointment details before scheduling
-- Check availability to avoid conflicts
-- Ask clarifying questions if details are missing
-- Provide clear summaries of scheduled items
-- Use structured formatting for task lists and schedules
-- Be proactive about suggesting optimal time slots
-
-When scheduling:
-- Verify date, time, and duration
-- Check for conflicts using the check_availability tool
-- CRITICAL: You must CONFIRM the "Title", "Date", and "Time" with the user explicitly BEFORE calling `schedule_appointment`.
-- Example: "Just to confirm, you want to schedule [Title] on [Date] at [Time]?"
-- Ask for confirmation **EXACTLY ONE TIME**.
-- If the user agrees, **IMMEDIATELY** call `schedule_appointment`. DO NOT ask for confirmation again.
-- Create the appointment using schedule_appointment
-- Confirm with a clear summary
-
-CRITICAL - HANDLING VAGUE REQUESTS:
-- If the user asks to schedule something but is missing details (e.g., "Schedule a meeting with John" without time/date):
-  1. IMMEDIATELY create a high-priority task named "Schedule [Event Type] - Placeholder" using `create_task`.
-  2. THEN ask the user for the missing details (date, time, duration).
-  3. Tell the user: "I've created a placeholder task for that. When would you like to schedule it?"
-- NEVER just ask for details without creating the placeholder task first. This ensures we don't lose the intent.
-
-When managing tasks:
-- Clarify priority (high/medium/low)
-- Set due dates when appropriate
-- Use create_task to add new items
-- Help users prioritize their workload
-
-Always be clear, concise, and action-oriented."""
 
 
 class PlannerAgent(BaseAgent):
@@ -117,7 +77,11 @@ class PlannerAgent(BaseAgent):
             memories = await self._get_memories(user_id)
             
             # Build context-enhanced prompt
-            enhanced_prompt = await self._build_context_prompt(message, memories, user_id)
+            enhanced_prompt = await self._build_context_prompt(
+                message=message,
+                memories=memories,
+                user_id=user_id
+            )
             
             # Use ADK agent to generate response and execute tools
             tools_used = []
@@ -152,39 +116,7 @@ class PlannerAgent(BaseAgent):
             logger.error(f"Error in Planner Agent process_message: {e}", exc_info=True)
             return self._build_error_response(e, "I'm having trouble with that request. Could you provide more details about what you'd like to schedule or plan?")
     
-    async def _build_context_prompt(
-        self,
-        message: str,
-        memories: List[Dict],
-        user_id: str,
-        personal_context: str = ""
-    ) -> str:
-        """Build enhanced prompt with context"""
-        prompt_parts = [f"User message: {message}"]
-        
-        # Add current time in user's timezone
-        try:
-            pref = await self.db.get_user_preference(user_id, "general", "timezone")
-            tz_str = pref["pref_value"] if pref else "UTC"
-            user_tz = ZoneInfo(tz_str)
-            now_local = datetime.now(user_tz)
-            prompt_parts.append(f"Current User Time: {now_local.strftime('%Y-%m-%d %H:%M')} ({tz_str})")
-        except Exception as e:
-            logger.warning(f"Failed to get user timezone context: {e}")
-            prompt_parts.append(f"Current UTC Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}")
-        
-        # Add personal context (especially tasks and events)
-        if personal_context:
-            prompt_parts.append(f"\n{personal_context}")
-        
-        # Add memory context
-        if memories:
-            memory_text = "\n".join([f"- {m.get('summary_text', '')}" for m in memories[:3]])
-            prompt_parts.append(f"\nPrevious scheduling context:\n{memory_text}")
-        
-        prompt_parts.append(f"\nUser ID: {user_id}")
-        
-        return "\n".join(prompt_parts)
+
     
     async def _generate_fallback_response(
         self,

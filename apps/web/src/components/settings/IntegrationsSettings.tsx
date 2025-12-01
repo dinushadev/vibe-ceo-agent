@@ -1,18 +1,24 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '@/context/AuthContext';
 
 export default function IntegrationsSettings() {
+    const { user } = useAuth();
     const [isConnected, setIsConnected] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        checkStatus();
-    }, []);
+        if (user?.user_id) {
+            checkStatus();
+        }
+    }, [user]);
 
     const checkStatus = async () => {
+        if (!user?.user_id) return;
+
         try {
-            const response = await fetch('http://localhost:8000/api/integrations/status?user_id=user_123');
+            const response = await fetch(`http://localhost:8000/api/integrations/status?user_id=${user.user_id}`);
             const data = await response.json();
             setIsConnected(data.google_calendar);
         } catch (error) {

@@ -235,6 +235,13 @@ class AgentTracer:
         """Get the complete trace"""
         return self._trace
         
+    def get_executions(self) -> List[Dict]:
+        """
+        Get list of tool executions
+        Added for backward compatibility with ToolExecutionTracker
+        """
+        return self._trace["tools"]
+        
     def clear(self):
         self.__init__()
 

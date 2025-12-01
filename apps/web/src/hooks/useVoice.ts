@@ -10,7 +10,7 @@ interface UseVoiceReturn {
     error: string | null;
 }
 
-export function useVoice(): UseVoiceReturn {
+export function useVoice(userId?: string): UseVoiceReturn {
     const [isListening, setIsListening] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
     const [transcript, setTranscript] = useState('');
@@ -36,11 +36,14 @@ export function useVoice(): UseVoiceReturn {
             console.log('Voice WebSocket connected');
             setError(null);
 
-            // Send initial configuration with timezone
+            // Send initial configuration with timezone and user_id
             const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
             ws.send(JSON.stringify({
                 type: 'config',
-                payload: { timezone }
+                payload: {
+                    timezone,
+                    user_id: userId
+                }
             }));
         };
 
@@ -78,7 +81,7 @@ export function useVoice(): UseVoiceReturn {
         };
 
         websocketRef.current = ws;
-    }, []);
+    }, [userId]);
 
     const processAudioQueue = async () => {
         if (isPlayingRef.current || audioQueueRef.current.length === 0) return;

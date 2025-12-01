@@ -8,6 +8,10 @@ from src.memory.memory_service import get_memory_service
 
 from src.services.stt_service import AsyncSTTService
 
+from src.agents.prompts import VOICE_SYSTEM_INSTRUCTION
+from src.agents.context_utils import get_context_string
+from src.db.database import get_database
+
 # Import Agent Tools
 from src.tools.planner_tool import consult_planner_wrapper
 from src.tools.knowledge_tool import consult_knowledge_wrapper
@@ -39,42 +43,7 @@ class VoiceService:
         self.current_model_response = ""
         
         # Define the Vibe CEO Persona
-        self.system_instruction = """
-        You are the "Personal Vibe CEO". 
-        Your goal is to help the user achieve PEAK PERFORMANCE and WELL-BEING.
-        
-        CORE PERSONALITY:
-        - Empathetic, supportive, and "vibey".
-        - You care about the user's stress levels and health.
-        - You are proactive but respectful.
-        
-        CAPABILITIES:
-        1. GENERAL CHAT: If the user just wants to talk, vent, or reflect, respond directly with your Vibe persona.
-        2. PLANNING: If the user needs to schedule, organize, or fix their day, use the 'consult_planner' tool.
-        3. KNOWLEDGE: If the user wants to learn, research, or understand a topic, use the 'consult_knowledge' tool.
-        4. PRODUCTIVITY (CRITICAL):
-           - ALWAYS DELEGATE ALL SCHEDULING AND TODO REQUESTS TO 'consult_planner'.
-           - DO NOT try to book events or create tasks directly using other tools.
-           - Even if the request is vague (e.g., "book a meeting"), call 'consult_planner' with the user's exact request.
-           - The Planner Agent will handle the details, placeholders, and CONFIRMATION.
-           - Trust the Planner Agent's response and relay it naturally.
-           - Do not double-check or ask the user again if the Planner Agent has already asked.
-        
-        AUDIO INSTRUCTIONS:
-        - Speak naturally and conversationally.
-        - Keep responses concise (users are listening, not reading).
-        - Use a warm, encouraging tone.
-
-        MEMORY CAPABILITIES:
-        - You can REMEMBER facts, preferences, and medical info using tools.
-        - If the user tells you something important (e.g., "I'm allergic to peanuts"), SAVE it.
-        - Use `get_user_profile` to recall facts if needed.
-        
-        CRITICAL: ALWAYS CHECK THE "CURRENT CONTEXT" SECTION BELOW BEFORE SAYING YOU DON'T KNOW.
-        - If "PENDING TASKS" are listed, you HAVE pending tasks.
-        - If "UPCOMING EVENTS" are listed, you HAVE upcoming events.
-        - Do NOT say the calendar is clear if events are listed in the context.
-        """
+        self.system_instruction = VOICE_SYSTEM_INSTRUCTION
         
         # Define Tools
         self.tools = [
@@ -115,7 +84,8 @@ class VoiceService:
         # Configure the session with tools and system instruction
         
         # 1. Fetch Memory Context
-        user_id = "user_123" # Default for MVP
+        from src.context import get_current_user_id
+        user_id = get_current_user_id()
         memory_context = ""
         personal_context = ""
         
@@ -148,13 +118,18 @@ class VoiceService:
                 logger.error(f"Failed to fetch memory context for voice: {e}", exc_info=True)
 
         # 2. Update System Instruction
-        # Explicitly instruct the model to use the context
-        context_instruction = """
+        # Use shared context utility to build the context string
+        db = await get_database()
+        context_string = await get_context_string(
+            user_id=user_id,
+            db=db,
+            memories=long_term,
+            personal_context=personal_context,
+            short_term_context=short_term,
+            include_time=True
+        )
         
-        CURRENT CONTEXT (Use this as the source of truth for tasks and events):
-        """
-        
-        dynamic_system_instruction = self.system_instruction + context_instruction + memory_context
+        dynamic_system_instruction = self.system_instruction + "\n\n" + context_string
         
         # Log the instruction to verify
         logger.info(f"Voice Service: System instruction updated. Length: {len(dynamic_system_instruction)}")

@@ -284,14 +284,20 @@ KNOWLEDGE_TOOLS = [
 
 # Tools for Vibe Agent
 # Tools for Vibe Agent
+from .planner_tool import consult_planner_wrapper
+
+# ... (existing imports)
+
+# Tools for Vibe Agent
 VIBE_TOOLS = [
     get_health_data,
     save_user_fact,
     get_user_profile,
     save_medical_info,
     get_medical_profile,
-    save_user_preference
-] + PLANNER_TOOLS  # Add planner tools for unified capability
+    save_user_preference,
+    consult_planner_wrapper  # Delegate to Planner Agent
+]
 
 # All available tools
 ALL_TOOLS = PLANNER_TOOLS + KNOWLEDGE_TOOLS + VIBE_TOOLS

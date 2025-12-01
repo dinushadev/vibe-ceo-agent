@@ -26,7 +26,40 @@ class BaseAgent(ABC):
         self.memory_service = memory_service or get_memory_service(db)
         self.adk_agent = None  # To be set by subclass
     
-    # ... (methods _get_memories)
+    async def _get_memories(self, user_id: str, query: str = None, limit: int = 5) -> List[Dict]:
+        """
+        Retrieve relevant memories for this agent
+        """
+        if not self.memory_service:
+            return []
+            
+        return await self.memory_service.get_agent_memories(
+            user_id=user_id,
+            agent_id=self.agent_id,
+            limit=limit,
+            query=query
+        )
+
+    async def _get_personal_context(self, user_id: str) -> str:
+        """
+        Get comprehensive personal context (facts, prefs, medical, etc.)
+        """
+        if not self.memory_service:
+            return ""
+            
+        return await self.memory_service.get_user_context(user_id)
+
+    async def _store_interaction(self, user_id: str, message: str, response: str):
+        """
+        Store the interaction in memory
+        """
+        if self.memory_service:
+            await self.memory_service.summarize_interaction(
+                user_id=user_id,
+                agent_id=self.agent_id,
+                user_message=message,
+                agent_response=response
+            )
 
     async def _generate_adk_response(
         self,
@@ -57,7 +90,7 @@ class BaseAgent(ABC):
             logger.error(f"ADK response generation failed for {self.agent_id}: {e}")
             return default_response, []
     
-    # ... (methods _get_personal_context, _store_interaction)
+
     
     def _build_response_dict(
         self,
@@ -123,16 +156,25 @@ class BaseAgent(ABC):
         """
         pass
     
-    @abstractmethod
-    def _build_context_prompt(self, message: str, **kwargs) -> str:
+    async def _build_context_prompt(self, message: str, **kwargs) -> str:
         """
-        Build context-enhanced prompt - must be implemented by subclass
+        Build context-enhanced prompt using shared utility
         
         Args:
             message: User message
-            **kwargs: Additional context data
+            **kwargs: Additional context data (user_id, memories, health_data, personal_context)
             
         Returns:
             Enhanced prompt string
         """
-        pass
+        from .context_utils import build_context_prompt
+        
+        return await build_context_prompt(
+            message=message,
+            user_id=kwargs.get("user_id"),
+            db=self.db,
+            memories=kwargs.get("memories"),
+            health_data=kwargs.get("health_data"),
+            personal_context=kwargs.get("personal_context", "")
+        )
+
