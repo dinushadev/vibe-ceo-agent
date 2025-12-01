@@ -10,22 +10,38 @@ The **Personal Vibe CEO System** showcases:
 - **Polyglot architecture** (Python backend + TypeScript frontend)
 - **Real-time voice and text interfaces** via WebSocket streaming
 
-### The Three Agents
+### 🤖 The Agent Ecosystem
 
-1. **Vibe Agent (A1)** - Proactive Balance Check
-   - Monitors emotional and health well-being
-   - Uses long-term memory to recall context
-   - Initiates proactive check-ins based on data patterns
+#### 1. Vibe Agent (The "Core" Persona)
+**Role:** The primary empathetic interface for emotional well-being and proactive health monitoring.
+- **Responsibilities:**
+  - Monitors health metrics (sleep, screen time, balance scores).
+  - Performs proactive check-ins when health indicators show imbalance.
+  - Manages the user's personal profile (facts, preferences, medical info).
+- **Key Tools:** `get_health_data`, `save_user_fact`, `consult_planner_wrapper`.
 
-2. **Planner Agent (A2)** - Task Scheduler
-   - Manages calendar and to-do items
-   - Executes tool calls to schedule appointments
-   - Generates structured action lists
+#### 2. Planner Agent (The "Executive" Worker)
+**Role:** A specialized, highly organized agent dedicated to calendar management and task execution.
+- **Responsibilities:**
+  - Manages the user's calendar (scheduling, checking availability).
+  - Tracks to-do lists and task priorities.
+  - Ensures no double-booking and optimizes the user's schedule.
+- **Key Tools:** `schedule_appointment`, `check_availability`, `create_task`.
 
-3. **Knowledge Agent (A3)** - Learning Digest Curator
-   - Searches and curates personalized learning content
-   - Creates structured learning digests
-   - Formats information for easy consumption
+#### 3. Knowledge Agent (The "Researcher" Worker)
+**Role:** A curator agent focused on learning and information synthesis.
+- **Responsibilities:**
+  - Researches topics based on user queries.
+  - Synthesizes information into easy-to-read "learning digests".
+  - Adapts content to the user's known learning interests.
+- **Key Tools:** `search_learning_content`.
+
+#### 4. Voice Service (The Orchestrator)
+**Role:** The real-time multimodal interface that connects the user's voice to the agent ecosystem using the **Agent-as-a-Tool** pattern.
+- **Responsibilities:**
+  - Handles real-time Speech-to-Text and Text-to-Speech via **Gemini Native Audio**.
+  - **Memory Injection:** Preloads Short-term, Long-term, and Personal context into the model before every session.
+  - **Routing:** Detects intents and routes specific requests to the Planner or Knowledge agents via tool calling.
 
 ## 🏗️ Architecture
 
