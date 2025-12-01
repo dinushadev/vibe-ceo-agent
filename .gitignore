@@ -52,3 +52,4 @@ logs/
 # Google Cloud
 credentials.json
 service-account-key.json
+client_secret.json
