@@ -11,11 +11,7 @@ def get_current_user_id() -> str:
     """
     user_id = _current_user_id.get()
     if user_id is None:
-        # Fallback for backward compatibility or testing if needed, 
-        # but ideally we should enforce setting it.
-        # For now, let's return a default to avoid breaking existing tests immediately,
-        # but log a warning if we had a logger here.
-        return "user_123" 
+        raise RuntimeError("Current user ID is not set in context")
     return user_id
 
 def set_current_user_id(user_id: str):

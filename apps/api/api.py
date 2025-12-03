@@ -424,6 +424,10 @@ async def websocket_endpoint(websocket: WebSocket):
     # Queue for audio chunks
     audio_queue = asyncio.Queue()
     
+    # Synchronization for user ID
+    user_id_event = asyncio.Event()
+    current_user_id = None
+
     async def audio_generator():
         """Yields audio chunks from the queue"""
         while True:
@@ -434,6 +438,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
     async def receive_audio():
         """Receive audio from WebSocket and put in queue"""
+        nonlocal current_user_id
         try:
             while True:
                 data = await websocket.receive_json()
@@ -458,21 +463,24 @@ async def websocket_endpoint(websocket: WebSocket):
                         user_id = payload.get("user_id")
                         
                         if not user_id:
-                            logger.warning("No user_id provided in config, defaulting to 'user_123' for backward compatibility")
-                            user_id = "user_123"
+                            logger.error("No user_id provided in config, skipping timezone update")
+                        else:
+                            # Update shared state
+                            current_user_id = user_id
+                            user_id_event.set()
 
-                        # Set context for tools
-                        from src.context import set_current_user_id
-                        set_current_user_id(user_id)
-                        
-                        await db.save_user_preference(
-                            pref_id=f"timezone_{user_id}",
-                            user_id=user_id,
-                            category="general",
-                            pref_key="timezone",
-                            pref_value=timezone
-                        )
-                        logger.info(f"Updated timezone for {user_id} to {timezone}")
+                            # Set context for tools (in this task)
+                            from src.context import set_current_user_id
+                            set_current_user_id(user_id)
+                            
+                            await db.save_user_preference(
+                                pref_id=f"timezone_{user_id}",
+                                user_id=user_id,
+                                category="general",
+                                pref_key="timezone",
+                                pref_value=timezone
+                            )
+                            logger.info(f"Updated timezone for {user_id} to {timezone}")
 
                 elif message_type == "ping":
                     await websocket.send_json({
@@ -490,6 +498,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
     async def process_audio():
         """Process audio stream and send responses using Native Audio"""
+        
+        # Wait for user ID to be available
+        logger.info("Waiting for user configuration...")
+        await user_id_event.wait()
+        
+        # Set context for this task
+        from src.context import set_current_user_id
+        if current_user_id:
+            set_current_user_id(current_user_id)
+            logger.info(f"Voice processing context set for user: {current_user_id}")
         
         while True:
             try:

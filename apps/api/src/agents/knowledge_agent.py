@@ -72,8 +72,8 @@ class KnowledgeAgent(BaseAgent):
         start_time = datetime.now()
         
         try:
-            # Retrieve relevant memories and profile
-            memories = await self._get_memories(user_id)
+            # Retrieve relevant memories and profile (Proactive Search)
+            memories = await self._get_memories(user_id, query=message)
             user_profile = await self._get_user_profile(user_id)
             
             # Build context-enhanced prompt
@@ -96,7 +96,7 @@ class KnowledgeAgent(BaseAgent):
                 response_text, tools_used = await self._generate_adk_response(
                     user_id, 
                     enhanced_prompt,
-                    default_response="I'm having trouble searching for that information. Please try again."
+                    default_response="Error: Search unavailable."
                 )
             else:
                 # Fallback response
@@ -122,7 +122,7 @@ class KnowledgeAgent(BaseAgent):
         
         except Exception as e:
             logger.error(f"Error in Knowledge Agent process_message: {e}", exc_info=True)
-            return self._build_error_response(e, "I'm having trouble curating that information. Could you try asking about a specific topic?")
+            return self._build_error_response(e, "Error: Curation failed.")
     
     async def _get_user_profile(self, user_id: str) -> Optional[Dict]:
         """Get user profile with learning interests"""
@@ -150,15 +150,4 @@ class KnowledgeAgent(BaseAgent):
             if len(parts) > 1:
                 topic = parts[1].strip().strip("?.!")
         
-        response_parts = [
-            f"I can help you learn about {topic}.",
-            "Typically, I would research this and provide a structured digest."
-        ]
-        
-        if user_profile and user_profile.get("learning_interests"):
-            interests = user_profile["learning_interests"]
-            response_parts.append(f"I see you're interested in {', '.join(interests[:2])}.")
-        
-        response_parts.append("What specific aspect would you like to know more about?")
-        
-        return " ".join(response_parts)
+        return f"Researching: {topic}..."

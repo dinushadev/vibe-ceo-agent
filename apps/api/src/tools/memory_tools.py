@@ -8,6 +8,7 @@ import uuid
 from typing import Dict, List, Optional
 
 from ..db.database import get_database
+from ..memory.memory_service import get_memory_service
 from src.context import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -155,4 +156,34 @@ async def save_user_preference(
     except Exception as e:
         logger.error(f"Error saving user preference: {e}")
         return {"status": "error", "message": str(e)}
+
+
+async def search_memory(query: str) -> List[Dict]:
+    """
+    Search for past memories and conversations related to a specific topic.
+    Use this when you need to recall details that are not in the current context.
+    
+    Args:
+        query: The search query (e.g., "what did we discuss about the project", "details about my trip").
+    """
+    try:
+        db = await get_database()
+        memory_service = get_memory_service(db)
+        user_id = get_current_user_id()
+        
+        results = await memory_service.get_agent_memories(
+            user_id=user_id,
+            agent_id="vibe", # Search across vibe agent memories by default
+            query=query,
+            limit=5
+        )
+        
+        return [
+            {"summary": r.get("summary_text"), "timestamp": r.get("created_at")} 
+            for r in results
+        ]
+    except Exception as e:
+        logger.error(f"Error searching memory: {e}")
+        return []
+
 

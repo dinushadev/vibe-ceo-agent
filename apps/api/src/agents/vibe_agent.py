@@ -12,10 +12,9 @@ except ImportError:
     from backports.zoneinfo import ZoneInfo
 
 from ..adk_config import create_agent
-from ..tools.adk_tools import VIBE_TOOLS
 from .base_agent import BaseAgent
 from ..adk_utils import create_adk_runner
-from .prompts import VIBE_AGENT_INSTRUCTION
+from .orchestrator_core import get_orchestrator_tools, get_orchestrator_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +42,9 @@ class VibeAgent(BaseAgent):
         try:
             self.adk_agent = create_agent(
                 name="vibe_agent",
-                instruction=VIBE_AGENT_INSTRUCTION,
+                instruction=get_orchestrator_instruction("text"),
                 description="An empathetic agent focused on emotional well-being and work-life balance",
-                tools=VIBE_TOOLS
+                tools=get_orchestrator_tools()
             )
             logger.info("ADK Vibe Agent initialized successfully")
         except Exception as e:

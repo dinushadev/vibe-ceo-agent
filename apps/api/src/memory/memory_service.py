@@ -18,24 +18,49 @@ class SessionMemory:
     """
     Short-term memory management using sliding window
     """
-    def __init__(self, max_turns: int = 10):
+    def __init__(self, max_turns: int = 20):
         self.max_turns = max_turns
-        self.history: Dict[str, deque] = {}  # user_id -> deque of messages
+        self.history: Dict[str, List[Dict]] = {} 
+        self.summaries: Dict[str, str] = {}
 
     def add_message(self, user_id: str, role: str, content: str):
         if user_id not in self.history:
-            self.history[user_id] = deque(maxlen=self.max_turns)
+            self.history[user_id] = []
+            self.summaries[user_id] = ""
         
         self.history[user_id].append({
             "role": role,
             "content": content,
             "timestamp": datetime.now().isoformat()
         })
+        
+        # Trigger summarization if history exceeds limit
+        if len(self.history[user_id]) > self.max_turns:
+            self._summarize_oldest(user_id)
+
+    def _summarize_oldest(self, user_id: str):
+        """
+        Summarize the oldest half of the history and append to summary.
+        """
+        # Take oldest chunk
+        chunk_size = self.max_turns // 2
+        oldest_chunk = self.history[user_id][:chunk_size]
+        self.history[user_id] = self.history[user_id][chunk_size:]
+        
+        # Create a simple summary string (In production, use LLM)
+        chunk_text = " ".join([f"{m['role']}: {m['content'][:50]}..." for m in oldest_chunk])
+        
+        current_summary = self.summaries.get(user_id, "")
+        if current_summary:
+            self.summaries[user_id] = f"{current_summary}\n...then: {chunk_text}"
+        else:
+            self.summaries[user_id] = f"Previous context: {chunk_text}"
 
     def get_history(self, user_id: str) -> List[Dict]:
-        if user_id not in self.history:
-            return []
-        return list(self.history[user_id])
+        return self.history.get(user_id, [])
+    
+    def get_summary(self, user_id: str) -> str:
+        return self.summaries.get(user_id, "")
 
 
 class ADKMemoryService:
@@ -117,14 +142,19 @@ class ADKMemoryService:
         self.session_memory.add_message(user_id, role, content)
 
     def get_short_term_context(self, user_id: str) -> str:
-        """Get formatted short-term history"""
+        """Get formatted short-term history with summary"""
         history = self.session_memory.get_history(user_id)
-        if not history:
-            return ""
+        summary = self.session_memory.get_summary(user_id)
         
-        formatted = "Current Conversation:\n"
-        for msg in history:
-            formatted += f"{msg['role']}: {msg['content']}\n"
+        formatted = ""
+        if summary:
+            formatted += f"Session Summary:\n{summary}\n\n"
+            
+        if history:
+            formatted += "Current Conversation:\n"
+            for msg in history:
+                formatted += f"{msg['role']}: {msg['content']}\n"
+            
         return formatted
 
     async def summarize_interaction(

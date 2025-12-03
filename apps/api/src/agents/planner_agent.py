@@ -73,8 +73,8 @@ class PlannerAgent(BaseAgent):
         start_time = datetime.now()
         
         try:
-            # Retrieve relevant memories
-            memories = await self._get_memories(user_id)
+            # Retrieve relevant memories (Proactive Search)
+            memories = await self._get_memories(user_id, query=message)
             
             # Build context-enhanced prompt
             enhanced_prompt = await self._build_context_prompt(
@@ -89,7 +89,7 @@ class PlannerAgent(BaseAgent):
                 response_text, tools_used = await self._generate_adk_response(
                     user_id, 
                     enhanced_prompt,
-                    default_response="I'm having trouble accessing my scheduling tools right now. Please try again."
+                    default_response="Error: Scheduling tools unavailable."
                 )
             else:
                 # Fallback response
@@ -114,7 +114,7 @@ class PlannerAgent(BaseAgent):
         
         except Exception as e:
             logger.error(f"Error in Planner Agent process_message: {e}", exc_info=True)
-            return self._build_error_response(e, "I'm having trouble with that request. Could you provide more details about what you'd like to schedule or plan?")
+            return self._build_error_response(e, "Error: Request failed.")
     
 
     
@@ -129,39 +129,13 @@ class PlannerAgent(BaseAgent):
         
         # Basic intent detection
         if any(word in message_lower for word in ["schedule", "book", "appointment"]):
-            return (
-                "I can help you schedule that. To book an appointment, I'll need:\n"
-                "1. What type of appointment (e.g., doctor, dentist)\n"
-                "2. Preferred date (YYYY-MM-DD)\n"
-                "3. Preferred time\n"
-                "4. Duration (if known)\n\n"
-                "Please provide these details and I'll check availability."
-            )
+            return "Please provide: Title, Date (YYYY-MM-DD), Time."
         
         elif any(word in message_lower for word in ["task", "todo", "remind"]):
-            return (
-                "I can create a task for you. Please tell me:\n"
-                "1. What the task is\n"
-                "2. Priority (high, medium, or low)\n"
-                "3. Due date (if any)\n\n"
-                "I'll add it to your task list."
-            )
+            return "Please provide: Task Title, Priority."
         
         elif any(word in message_lower for word in ["upcoming", "scheduled", "calendar"]):
-            return (
-                "I can check your upcoming appointments and tasks. "
-                "Would you like to see:\n"
-                "- Upcoming appointments\n"
-                "- Pending tasks\n"
-                "- Both?"
-            )
+            return "Checking calendar..."
         
         else:
-            return (
-                "I'm your Planner Agent. I can help you:\n"
-                "- Schedule appointments\n"
-                "- Manage tasks\n"
-                "- Check your calendar\n"
-                "- Set reminders\n\n"
-                "What would you like to plan?"
-            )
+            return "Please specify: Schedule Appointment or Create Task."

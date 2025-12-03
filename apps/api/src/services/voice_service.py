@@ -8,21 +8,9 @@ from src.memory.memory_service import get_memory_service
 
 from src.services.stt_service import AsyncSTTService
 
-from src.agents.prompts import VOICE_SYSTEM_INSTRUCTION
 from src.agents.context_utils import get_context_string
 from src.db.database import get_database
-
-# Import Agent Tools
-from src.tools.planner_tool import consult_planner_wrapper
-from src.tools.knowledge_tool import consult_knowledge_wrapper
-from src.tools.memory_tools import (
-    save_user_fact,
-    get_user_profile,
-    save_medical_info,
-    get_medical_profile,
-    save_user_preference
-)
-# Productivity tools removed to enforce delegation to PlannerAgent
+from src.agents.orchestrator_core import get_orchestrator_tools, get_orchestrator_instruction
 
 logger = logging.getLogger(__name__)
 
@@ -43,18 +31,10 @@ class VoiceService:
         self.current_model_response = ""
         
         # Define the Vibe CEO Persona
-        self.system_instruction = VOICE_SYSTEM_INSTRUCTION
+        self.system_instruction = get_orchestrator_instruction("voice")
         
         # Define Tools
-        self.tools = [
-            consult_planner_wrapper, 
-            consult_knowledge_wrapper,
-            save_user_fact,
-            get_user_profile,
-            save_medical_info,
-            get_medical_profile,
-            save_user_preference
-        ]
+        self.tools = get_orchestrator_tools()
         
         # Attempt initial initialization
         self._initialize_client()
